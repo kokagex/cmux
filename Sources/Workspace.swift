@@ -410,6 +410,7 @@ extension Workspace {
         let terminalSnapshot: SessionTerminalPanelSnapshot?
         let browserSnapshot: SessionBrowserPanelSnapshot?
         let markdownSnapshot: SessionMarkdownPanelSnapshot?
+        let fileExplorerSnapshot: SessionFileExplorerPanelSnapshot?
         switch panel.panelType {
         case .terminal:
             guard let terminalPanel = panel as? TerminalPanel else { return nil }
@@ -433,6 +434,7 @@ extension Workspace {
             )
             browserSnapshot = nil
             markdownSnapshot = nil
+            fileExplorerSnapshot = nil
         case .browser:
             guard let browserPanel = panel as? BrowserPanel else { return nil }
             terminalSnapshot = nil
@@ -447,15 +449,29 @@ extension Workspace {
                 forwardHistoryURLStrings: historySnapshot.forwardHistoryURLStrings
             )
             markdownSnapshot = nil
+            fileExplorerSnapshot = nil
         case .markdown:
             guard let markdownPanel = panel as? MarkdownPanel else { return nil }
             terminalSnapshot = nil
             browserSnapshot = nil
             markdownSnapshot = SessionMarkdownPanelSnapshot(filePath: markdownPanel.filePath)
+            fileExplorerSnapshot = nil
         case .fileExplorer:
             terminalSnapshot = nil
             browserSnapshot = nil
             markdownSnapshot = nil
+            if let fePanel = panel as? FileExplorerPanel {
+                fileExplorerSnapshot = SessionFileExplorerPanelSnapshot(
+                    rootPath: fePanel.rootPath,
+                    expandedPaths: collectExpandedPaths(fePanel.rootNodes),
+                    selectedPath: nil,
+                    showHiddenFiles: fePanel.showHiddenFiles,
+                    showIgnoredFiles: fePanel.showIgnoredFiles,
+                    openAction: fePanel.openAction.rawValue
+                )
+            } else {
+                fileExplorerSnapshot = nil
+            }
         }
 
         return SessionPanelSnapshot(
@@ -471,8 +487,20 @@ extension Workspace {
             ttyName: ttyName,
             terminal: terminalSnapshot,
             browser: browserSnapshot,
-            markdown: markdownSnapshot
+            markdown: markdownSnapshot,
+            fileExplorer: fileExplorerSnapshot
         )
+    }
+
+    private func collectExpandedPaths(_ nodes: [FileNode]) -> [String] {
+        var paths: [String] = []
+        for node in nodes where node.isDirectory && node.isExpanded {
+            paths.append(node.url.path)
+            if let children = node.children {
+                paths.append(contentsOf: collectExpandedPaths(children))
+            }
+        }
+        return paths
     }
 
     nonisolated static func resolvedSnapshotTerminalScrollback(
