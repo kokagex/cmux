@@ -63,15 +63,25 @@ func cmuxInheritedSurfaceConfig(
     sourceSurface: ghostty_surface_t,
     context: ghostty_surface_context_e
 ) -> ghostty_surface_config_s {
+    // Validate the surface pointer before passing it to the Ghostty C API.
+    // A stale freed pointer can cause EXC_BAD_ACCESS, especially on Intel
+    // Macs where memory is recycled more aggressively (#1496, #1870).
+    guard cmuxSurfacePointerAppearsLive(sourceSurface) else {
+        return ghostty_surface_config_new()
+    }
     let inherited = ghostty_surface_inherited_config(sourceSurface, context)
-    var config = inherited
 
     // Make runtime zoom inheritance explicit, even when Ghostty's
     // inherit-font-size config is disabled.
     let runtimePoints = cmuxCurrentSurfaceFontSizePoints(sourceSurface)
-    if let points = runtimePoints {
-        config.font_size = points
-    }
+
+    // Rebuild a clean config with only font_size. The inherited struct can
+    // carry raw C pointers (env_vars, working_directory, command, initial_input)
+    // owned by the source surface that become dangling after the surface is
+    // freed — especially on Intel Macs (#1496, #1870). All callers only need
+    // the font size, so never propagate pointer-backed fields.
+    var config = ghostty_surface_config_new()
+    config.font_size = runtimePoints ?? inherited.font_size
 
 #if DEBUG
     let inheritedText = String(format: "%.2f", inherited.font_size)
@@ -7338,14 +7348,23 @@ final class Workspace: Identifiable, ObservableObject {
                 }
                 continue
             }
-            var config = cmuxInheritedSurfaceConfig(
+            // ghostty_surface_config_s can carry raw C pointers owned by the
+            // source surface (env_vars, working_directory, command, initial_input).
+            // Rebuild a clean config with only the inherited font size so we never
+            // pass dangling pointers to the new surface — the same pattern used for
+            // workspace creation in TabManager.workspaceCreationConfigTemplate().
+            // This prevents EXC_BAD_ACCESS on Intel Macs where freed memory is
+            // recycled more aggressively than on ARM64 (#1496, #1870).
+            let inherited = cmuxInheritedSurfaceConfig(
                 sourceSurface: sourceSurface,
                 context: GHOSTTY_SURFACE_CONTEXT_SPLIT
             )
+            var config = ghostty_surface_config_new()
+            config.font_size = inherited.font_size
             if let rootedFontPoints = resolvedTerminalInheritanceFontPoints(
                 for: terminalPanel,
                 sourceSurface: sourceSurface,
-                inheritedConfig: config
+                inheritedConfig: inherited
             ), rootedFontPoints > 0 {
                 config.font_size = rootedFontPoints
                 terminalInheritanceFontPointsByPanelId[terminalPanel.id] = rootedFontPoints

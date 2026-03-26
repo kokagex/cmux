@@ -3517,7 +3517,12 @@ final class TerminalSurface: Identifiable, ObservableObject {
 
         var env: [String: String] = [:]
         if surfaceConfig.env_var_count > 0, let existingEnv = surfaceConfig.env_vars {
-            let count = Int(surfaceConfig.env_var_count)
+            // Validate the env_vars pointer before dereferencing — it may be a
+            // stale pointer from a ghostty_surface_inherited_config struct whose
+            // backing memory was freed. This is a defense-in-depth check for
+            // Intel Macs where freed memory is recycled aggressively (#1496, #1870).
+            let envPointerLive = malloc_size(UnsafeRawPointer(existingEnv)) > 0
+            let count = envPointerLive ? Int(surfaceConfig.env_var_count) : 0
             if count > 0 {
                 for i in 0..<count {
                     let item = existingEnv[i]
