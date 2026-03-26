@@ -1,0 +1,286 @@
+import Foundation
+import CoreServices
+
+// MARK: - FileExplorerOpenAction
+
+enum FileExplorerOpenAction: String, Codable, Sendable {
+    case editor
+    case builtin
+    case system
+}
+
+// MARK: - FileExplorerPanel
+
+/// A panel that displays a file explorer tree for a given directory.
+/// Watches the directory for changes via FSEventStream and reflects git status.
+@MainActor
+final class FileExplorerPanel: Panel, ObservableObject {
+    let id: UUID
+    let panelType: PanelType = .fileExplorer
+
+    /// The workspace this panel belongs to.
+    private(set) var workspaceId: UUID
+
+    // MARK: - Published properties
+
+    /// Absolute path to the root directory being displayed.
+    @Published var rootPath: String {
+        didSet {
+            displayTitle = (rootPath as NSString).lastPathComponent
+            reloadTree()
+        }
+    }
+
+    /// Title shown in the tab bar (directory name).
+    @Published private(set) var displayTitle: String
+
+    /// SF Symbol icon for the tab bar.
+    var displayIcon: String? { "folder.fill" }
+
+    /// Top-level file nodes in the tree.
+    @Published private(set) var rootNodes: [FileNode] = []
+
+    /// Git status keyed by absolute file path.
+    @Published private(set) var gitStatuses: [String: GitFileStatus] = [:]
+
+    /// Set of absolute paths that are git-ignored.
+    @Published private(set) var ignoredPaths: Set<String> = []
+
+    /// Whether to show files whose names start with `.`.
+    @Published var showHiddenFiles: Bool = false {
+        didSet { reloadTree() }
+    }
+
+    /// Whether to show git-ignored files.
+    @Published var showIgnoredFiles: Bool = false {
+        didSet { reloadTree() }
+    }
+
+    /// What happens when the user opens a file in the explorer.
+    @Published var openAction: FileExplorerOpenAction = .editor
+
+    /// Token incremented to trigger focus flash animation.
+    @Published private(set) var focusFlashToken: Int = 0
+
+    /// Text used to filter the file list.
+    @Published var filterText: String = ""
+
+    // MARK: - Internal state
+
+    private var isClosed: Bool = false
+    private var gitStatusProvider: GitStatusProvider?
+
+    // FSEventStream — nonisolated(unsafe) because the stream may be stopped from deinit
+    // which is not guaranteed to run on the main actor, but FSEventStreamStop/Invalidate/Release
+    // are safe to call from any thread.
+    private nonisolated(unsafe) var eventStream: FSEventStreamRef?
+    private let fsEventQueue = DispatchQueue(label: "com.cmux.file-explorer-fsevents", qos: .utility)
+
+    // Debounce work items
+    private var fsEventDebounceWork: DispatchWorkItem?
+    private var gitStatusDebounceWork: DispatchWorkItem?
+
+    // Async task handles
+    private var gitStatusTask: Task<Void, Never>?
+    private var ignoredPathsTask: Task<Void, Never>?
+
+    // MARK: - Init
+
+    init(workspaceId: UUID, rootPath: String) {
+        self.id = UUID()
+        self.workspaceId = workspaceId
+        self.rootPath = rootPath
+        self.displayTitle = (rootPath as NSString).lastPathComponent
+
+        let provider = GitStatusProvider(rootPath: rootPath)
+        self.gitStatusProvider = provider
+
+        reloadTree()
+        startFSEventStream()
+        refreshIgnoredPaths()
+        refreshGitStatus()
+    }
+
+    // MARK: - Panel protocol
+
+    func focus() {
+        // NSOutlineView handles focus — no-op here.
+    }
+
+    func unfocus() {
+        // No-op.
+    }
+
+    func close() {
+        isClosed = true
+        stopFSEventStream()
+        fsEventDebounceWork?.cancel()
+        gitStatusDebounceWork?.cancel()
+        gitStatusTask?.cancel()
+        ignoredPathsTask?.cancel()
+    }
+
+    func triggerFlash(reason: WorkspaceAttentionFlashReason) {
+        _ = reason
+        guard NotificationPaneFlashSettings.isEnabled() else { return }
+        focusFlashToken += 1
+    }
+
+    // MARK: - File tree
+
+    /// Reloads the root-level nodes from the filesystem.
+    func reloadTree() {
+        let rootURL = URL(fileURLWithPath: rootPath)
+        let rootNode = FileNode(url: rootURL, name: (rootPath as NSString).lastPathComponent, isDirectory: true)
+        rootNode.loadChildren(showHidden: showHiddenFiles, ignoredPaths: showIgnoredFiles ? [] : ignoredPaths)
+
+        let nodes = rootNode.children ?? []
+        rootNodes = nodes
+        applyGitStatuses(gitStatuses, to: rootNodes)
+    }
+
+    /// Reloads children for a specific node (e.g., when it is expanded).
+    func refreshExpandedNode(_ node: FileNode) {
+        node.loadChildren(showHidden: showHiddenFiles, ignoredPaths: showIgnoredFiles ? [] : ignoredPaths)
+        applyGitStatuses(gitStatuses, to: node.children ?? [])
+    }
+
+    /// Applies a git status dictionary to a flat array of nodes (non-recursive, top-level only).
+    private func applyGitStatuses(_ statuses: [String: GitFileStatus], to nodes: [FileNode]) {
+        for node in nodes {
+            if let status = statuses[node.url.path] {
+                node.gitStatus = status
+            }
+        }
+    }
+
+    // MARK: - Git status
+
+    /// Asynchronously refreshes the git status, debounced by 500 ms.
+    func refreshGitStatus() {
+        gitStatusDebounceWork?.cancel()
+        let work = DispatchWorkItem { [weak self] in
+            guard let self else { return }
+            Task { @MainActor in
+                await self.performGitStatusRefresh()
+            }
+        }
+        gitStatusDebounceWork = work
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5, execute: work)
+    }
+
+    private func performGitStatusRefresh() async {
+        guard !isClosed, let provider = gitStatusProvider else { return }
+        let statuses = await provider.fetchStatuses()
+        guard !isClosed else { return }
+        gitStatuses = statuses
+        applyGitStatuses(statuses, to: rootNodes)
+    }
+
+    /// Asynchronously refreshes the set of git-ignored paths.
+    func refreshIgnoredPaths() {
+        ignoredPathsTask?.cancel()
+        ignoredPathsTask = Task { @MainActor in
+            await self.performIgnoredPathsRefresh()
+        }
+    }
+
+    private func performIgnoredPathsRefresh() async {
+        guard !isClosed, let provider = gitStatusProvider else { return }
+
+        // Gather immediate children to check for ignored status
+        let rootURL = URL(fileURLWithPath: rootPath)
+        let fm = FileManager.default
+        let contents = (try? fm.contentsOfDirectory(at: rootURL, includingPropertiesForKeys: nil, options: [])) ?? []
+        let paths = contents.map { $0.path }
+
+        let ignored = await provider.fetchIgnoredPaths(paths)
+        guard !isClosed, !Task.isCancelled else { return }
+        ignoredPaths = ignored
+
+        // If we're hiding ignored files, reload the tree to apply the new filter
+        if !showIgnoredFiles {
+            reloadTree()
+        }
+    }
+
+    // MARK: - FSEventStream
+
+    func startFSEventStream() {
+        guard eventStream == nil else { return }
+
+        let pathsToWatch = [rootPath] as CFArray
+        let latency: CFTimeInterval = 0.1 // 100 ms
+
+        // Use Unmanaged to bridge self as a raw pointer into the C callback.
+        let selfPtr = Unmanaged.passRetained(self).toOpaque()
+
+        var context = FSEventStreamContext(
+            version: 0,
+            info: selfPtr,
+            retain: nil,
+            release: { ptr in
+                // Release the retained reference when the stream is invalidated.
+                if let ptr { Unmanaged<FileExplorerPanel>.fromOpaque(ptr).release() }
+            },
+            copyDescription: nil
+        )
+
+        let callback: FSEventStreamCallback = { _, info, _, _, _, _ in
+            guard let info else { return }
+            let panel = Unmanaged<FileExplorerPanel>.fromOpaque(info).takeUnretainedValue()
+            // Dispatch onto main actor — handleFSEvents is @MainActor.
+            DispatchQueue.main.async {
+                panel.handleFSEvents()
+            }
+        }
+
+        let stream = FSEventStreamCreate(
+            kCFAllocatorDefault,
+            callback,
+            &context,
+            pathsToWatch,
+            FSEventStreamEventId(kFSEventStreamEventIdSinceNow),
+            latency,
+            FSEventStreamCreateFlags(kFSEventStreamCreateFlagUseCFTypes |
+                                     kFSEventStreamCreateFlagFileEvents |
+                                     kFSEventStreamCreateFlagNoDefer)
+        )
+
+        guard let stream else { return }
+        FSEventStreamSetDispatchQueue(stream, fsEventQueue)
+        FSEventStreamStart(stream)
+        eventStream = stream
+    }
+
+    func stopFSEventStream() {
+        guard let stream = eventStream else { return }
+        FSEventStreamStop(stream)
+        FSEventStreamInvalidate(stream)
+        FSEventStreamRelease(stream)
+        eventStream = nil
+    }
+
+    /// Debounced handler for FSEvent callbacks — waits 100 ms before acting.
+    func handleFSEvents() {
+        fsEventDebounceWork?.cancel()
+        let work = DispatchWorkItem { [weak self] in
+            guard let self, !self.isClosed else { return }
+            self.reloadTree()
+            self.refreshGitStatus()
+        }
+        fsEventDebounceWork = work
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.1, execute: work)
+    }
+
+    // MARK: - Deinit
+
+    deinit {
+        // FSEventStream stop/invalidate/release are thread-safe.
+        if let stream = eventStream {
+            FSEventStreamStop(stream)
+            FSEventStreamInvalidate(stream)
+            FSEventStreamRelease(stream)
+        }
+    }
+}
