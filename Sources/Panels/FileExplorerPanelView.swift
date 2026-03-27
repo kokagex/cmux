@@ -90,6 +90,21 @@ struct FileExplorerPanelView: View {
                     String(localized: "fileExplorer.toolbar.showIgnoredFiles", defaultValue: "Show Ignored Files"),
                     isOn: $panel.showIgnoredFiles
                 )
+
+                Divider()
+
+                // ファイルオープン動作
+                Picker(
+                    String(localized: "fileExplorer.toolbar.openAction", defaultValue: "Open Files With"),
+                    selection: $panel.openAction
+                ) {
+                    Text(String(localized: "fileExplorer.toolbar.openAction.editor", defaultValue: "$EDITOR (Terminal)"))
+                        .tag(FileExplorerOpenAction.editor)
+                    Text(String(localized: "fileExplorer.toolbar.openAction.builtin", defaultValue: "Built-in Viewer"))
+                        .tag(FileExplorerOpenAction.builtin)
+                    Text(String(localized: "fileExplorer.toolbar.openAction.system", defaultValue: "System Default"))
+                        .tag(FileExplorerOpenAction.system)
+                }
             } label: {
                 Image(systemName: "ellipsis")
                     .font(.system(size: 12))
