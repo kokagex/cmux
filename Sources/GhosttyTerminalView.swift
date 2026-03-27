@@ -3623,18 +3623,26 @@ final class TerminalSurface: Identifiable, ObservableObject {
             initialEnvironmentOverrides: initialEnvironmentOverrides
         )
 
-        // All C interop (ghostty_surface_config_new, GhosttySurfaceCallbackContext,
-        // ghostty_surface_new) isolated in a separate @inline(never) stack frame to
-        // prevent Swift -O sret buffer overlap corruption on Intel Macs.
-        let (newSurface, newCallbackContext) = performSurfaceCreation(
-            app: app,
-            view: view,
-            layerScaleFactor: scaleFactors.layer,
-            env: env
+        // Create callback context HERE (in createSurface's stack frame) so
+        // the UUID allocation never shares a frame with the ghostty_surface_config_new
+        // sret buffer. Swift -O can corrupt UUID VWT pointers when they coexist
+        // with the 112-byte sret write in the same stack frame — even inside an
+        // @inline(never) function.
+        let newCallbackContext = Unmanaged.passRetained(
+            GhosttySurfaceCallbackContext(surfaceView: view, terminalSurface: self)
         )
         surfaceCallbackContext?.release()
         surfaceCallbackContext = newCallbackContext
-        surface = newSurface
+
+        // All C struct interop (ghostty_surface_config_new sret, ghostty_surface_new)
+        // isolated in a separate @inline(never) stack frame.
+        surface = performSurfaceCreation(
+            app: app,
+            view: view,
+            callbackContext: newCallbackContext,
+            layerScaleFactor: scaleFactors.layer,
+            env: env
+        )
 
         if surface == nil {
             surfaceCallbackContext?.release()
@@ -3741,27 +3749,31 @@ final class TerminalSurface: Identifiable, ObservableObject {
 #endif
     }
 
-    // Isolates all C interop (ghostty_surface_config_new sret, callback context
-    // UUID allocation, ghostty_surface_new) in a dedicated stack frame. Swift -O
-    // whole-module optimization can misallocate the 112-byte sret buffer for
-    // ghostty_surface_config_new() so it overlaps live stack slots in a large
-    // function, corrupting UUID VWT pointers and type metadata. Keeping all
-    // C struct operations here (with @inline(never)) gives the sret buffer its
-    // own frame, preventing the overlap while leaving the rest of the binary
-    // fully optimized.
+    // Swift -O whole-module optimization misallocates the 112-byte sret return
+    // buffer for ghostty_surface_config_new(), corrupting adjacent stack slots.
+    // Disabling optimization on this one-line wrapper prevents the misallocation
+    // while keeping everything else fully optimized. The function is trivially
+    // small so there is zero performance impact.
+    @_optimize(none)
+    private static func safeDefaultSurfaceConfig() -> ghostty_surface_config_s {
+        return ghostty_surface_config_new()
+    }
+
+    // Isolates C struct interop in a dedicated stack frame. The callback context
+    // (with its UUID allocation) is created in createSurface and passed in.
     @inline(never)
     private func performSurfaceCreation(
         app: ghostty_app_t,
         view: GhosttyNSView,
+        callbackContext: Unmanaged<GhosttySurfaceCallbackContext>,
         layerScaleFactor: CGFloat,
         env: [String: String]
-    ) -> (surface: ghostty_surface_t?, callbackContext: Unmanaged<GhosttySurfaceCallbackContext>) {
-        var surfaceConfig = configTemplate ?? ghostty_surface_config_new()
+    ) -> ghostty_surface_t? {
+        var surfaceConfig = configTemplate ?? Self.safeDefaultSurfaceConfig()
         surfaceConfig.platform_tag = GHOSTTY_PLATFORM_MACOS
         surfaceConfig.platform = ghostty_platform_u(macos: ghostty_platform_macos_s(
             nsview: Unmanaged.passUnretained(view).toOpaque()
         ))
-        let callbackContext = Unmanaged.passRetained(GhosttySurfaceCallbackContext(surfaceView: view, terminalSurface: self))
         surfaceConfig.userdata = callbackContext.toOpaque()
         surfaceConfig.scale_factor = layerScaleFactor
         surfaceConfig.context = surfaceContext
@@ -3828,7 +3840,7 @@ final class TerminalSurface: Identifiable, ObservableObject {
             doCreateSurface()
         }
 
-        return (resultSurface, callbackContext)
+        return resultSurface
     }
 
     @discardableResult
