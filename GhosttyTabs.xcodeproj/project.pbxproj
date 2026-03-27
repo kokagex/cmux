@@ -37,6 +37,7 @@
 		FE100020 /* EditorPanel.swift in Sources */ = {isa = PBXBuildFile; fileRef = FE200020 /* EditorPanel.swift */; };
 		FE100030 /* SyntaxHighlighter.swift in Sources */ = {isa = PBXBuildFile; fileRef = FE200030 /* SyntaxHighlighter.swift */; };
 		FE100040 /* EditorTextView.swift in Sources */ = {isa = PBXBuildFile; fileRef = FE200040 /* EditorTextView.swift */; };
+		FE100050 /* EditorPanelView.swift in Sources */ = {isa = PBXBuildFile; fileRef = FE200050 /* EditorPanelView.swift */; };
 		A5001421 /* MarkdownPanelView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A5001419 /* MarkdownPanelView.swift */; };
 		FE100001 /* FileNode.swift in Sources */ = {isa = PBXBuildFile; fileRef = FE200001 /* FileNode.swift */; };
 		FE100002 /* FileIconMapper.swift in Sources */ = {isa = PBXBuildFile; fileRef = FE200002 /* FileIconMapper.swift */; };
@@ -228,6 +229,7 @@
 		FE200020 /* EditorPanel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Panels/EditorPanel.swift; sourceTree = "<group>"; };
 		FE200030 /* SyntaxHighlighter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Panels/SyntaxHighlighter.swift; sourceTree = "<group>"; };
 		FE200040 /* EditorTextView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Panels/EditorTextView.swift; sourceTree = "<group>"; };
+		FE200050 /* EditorPanelView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Panels/EditorPanelView.swift; sourceTree = "<group>"; };
 		A5001419 /* MarkdownPanelView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Panels/MarkdownPanelView.swift; sourceTree = "<group>"; };
 		FE200001 /* FileNode.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Panels/FileNode.swift; sourceTree = "<group>"; };
 		FE200002 /* FileIconMapper.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Panels/FileIconMapper.swift; sourceTree = "<group>"; };
@@ -473,6 +475,7 @@
 				FE200020 /* EditorPanel.swift */,
 				FE200030 /* SyntaxHighlighter.swift */,
 				FE200040 /* EditorTextView.swift */,
+				FE200050 /* EditorPanelView.swift */,
 				FE200001 /* FileNode.swift */,
 				FE200002 /* FileIconMapper.swift */,
 				FE200003 /* GitStatusProvider.swift */,
@@ -783,6 +786,7 @@
 				FE100020 /* EditorPanel.swift in Sources */,
 				FE100030 /* SyntaxHighlighter.swift in Sources */,
 				FE100040 /* EditorTextView.swift in Sources */,
+				FE100050 /* EditorPanelView.swift in Sources */,
 				FE100001 /* FileNode.swift in Sources */,
 				FE100002 /* FileIconMapper.swift in Sources */,
 				FE100003 /* GitStatusProvider.swift in Sources */,
