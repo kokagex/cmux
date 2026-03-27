@@ -675,7 +675,23 @@ extension Workspace {
             applySessionPanelMetadata(snapshot, toPanelId: markdownPanel.id)
             return markdownPanel.id
         case .fileExplorer:
-            return nil
+            guard let rootPath = snapshot.fileExplorer?.rootPath ?? snapshot.directory,
+                  let fileExplorerPanel = newFileExplorerSurface(
+                    inPane: paneId,
+                    rootPath: rootPath,
+                    focus: false
+                  ) else {
+                return nil
+            }
+            if let feSnapshot = snapshot.fileExplorer {
+                fileExplorerPanel.showHiddenFiles = feSnapshot.showHiddenFiles
+                fileExplorerPanel.showIgnoredFiles = feSnapshot.showIgnoredFiles
+                if let action = FileExplorerOpenAction(rawValue: feSnapshot.openAction) {
+                    fileExplorerPanel.openAction = action
+                }
+            }
+            applySessionPanelMetadata(snapshot, toPanelId: fileExplorerPanel.id)
+            return fileExplorerPanel.id
         }
     }
 
@@ -6037,6 +6053,30 @@ final class Workspace: Identifiable, ObservableObject {
         panelSubscriptions[markdownPanel.id] = subscription
     }
 
+    private func installFileExplorerPanelSubscription(_ fileExplorerPanel: FileExplorerPanel) {
+        let subscription = fileExplorerPanel.$displayTitle
+            .removeDuplicates()
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self, weak fileExplorerPanel] newTitle in
+                guard let self,
+                      let fileExplorerPanel,
+                      let tabId = self.surfaceIdFromPanelId(fileExplorerPanel.id) else { return }
+                guard let existing = self.bonsplitController.tab(tabId) else { return }
+
+                if self.panelTitles[fileExplorerPanel.id] != newTitle {
+                    self.panelTitles[fileExplorerPanel.id] = newTitle
+                }
+                let resolvedTitle = self.resolvedPanelTitle(panelId: fileExplorerPanel.id, fallback: newTitle)
+                guard existing.title != resolvedTitle else { return }
+                self.bonsplitController.updateTab(
+                    tabId,
+                    title: resolvedTitle,
+                    hasCustomTitle: self.panelCustomTitles[fileExplorerPanel.id] != nil
+                )
+            }
+        panelSubscriptions[fileExplorerPanel.id] = subscription
+    }
+
     private func browserRemoteWorkspaceStatusSnapshot() -> BrowserRemoteWorkspaceStatus? {
         guard let target = remoteDisplayTarget else { return nil }
         return BrowserRemoteWorkspaceStatus(
@@ -7893,6 +7933,116 @@ final class Workspace: Identifiable, ObservableObject {
 
         installMarkdownPanelSubscription(markdownPanel)
         return markdownPanel
+    }
+
+    @discardableResult
+    func newFileExplorerSplit(
+        from panelId: UUID,
+        orientation: SplitOrientation,
+        insertFirst: Bool = false,
+        rootPath: String? = nil,
+        focus: Bool = true
+    ) -> FileExplorerPanel? {
+        guard let sourceTabId = surfaceIdFromPanelId(panelId) else { return nil }
+        var sourcePaneId: PaneID?
+        for paneId in bonsplitController.allPaneIds {
+            let tabs = bonsplitController.tabs(inPane: paneId)
+            if tabs.contains(where: { $0.id == sourceTabId }) {
+                sourcePaneId = paneId
+                break
+            }
+        }
+
+        guard let paneId = sourcePaneId else { return nil }
+
+        let resolvedRootPath = rootPath ?? currentDirectory ?? NSHomeDirectory()
+        let fileExplorerPanel = FileExplorerPanel(workspaceId: id, rootPath: resolvedRootPath)
+        panels[fileExplorerPanel.id] = fileExplorerPanel
+        panelTitles[fileExplorerPanel.id] = fileExplorerPanel.displayTitle
+
+        let newTab = Bonsplit.Tab(
+            title: fileExplorerPanel.displayTitle,
+            icon: fileExplorerPanel.displayIcon,
+            kind: SurfaceKind.fileExplorer,
+            isDirty: false,
+            isLoading: false,
+            isPinned: false
+        )
+        surfaceIdToPanelId[newTab.id] = fileExplorerPanel.id
+        let previousFocusedPanelId = focusedPanelId
+
+        isProgrammaticSplit = true
+        defer { isProgrammaticSplit = false }
+        guard bonsplitController.splitPane(paneId, orientation: orientation, withTab: newTab, insertFirst: insertFirst) != nil else {
+            surfaceIdToPanelId.removeValue(forKey: newTab.id)
+            panels.removeValue(forKey: fileExplorerPanel.id)
+            panelTitles.removeValue(forKey: fileExplorerPanel.id)
+            return nil
+        }
+
+        let previousHostedView = focusedTerminalPanel?.hostedView
+        if focus {
+            previousHostedView?.suppressReparentFocus()
+            focusPanel(fileExplorerPanel.id)
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
+                previousHostedView?.clearSuppressReparentFocus()
+            }
+        } else {
+            preserveFocusAfterNonFocusSplit(
+                preferredPanelId: previousFocusedPanelId,
+                splitPanelId: fileExplorerPanel.id,
+                previousHostedView: previousHostedView
+            )
+        }
+
+        installFileExplorerPanelSubscription(fileExplorerPanel)
+        return fileExplorerPanel
+    }
+
+    @discardableResult
+    func newFileExplorerSurface(
+        inPane paneId: PaneID,
+        rootPath: String? = nil,
+        focus: Bool? = nil
+    ) -> FileExplorerPanel? {
+        let shouldFocusNewTab = focus ?? (bonsplitController.focusedPaneId == paneId)
+        let previousFocusedPanelId = focusedPanelId
+        let previousHostedView = focusedTerminalPanel?.hostedView
+
+        let resolvedRootPath = rootPath ?? currentDirectory ?? NSHomeDirectory()
+        let fileExplorerPanel = FileExplorerPanel(workspaceId: id, rootPath: resolvedRootPath)
+        panels[fileExplorerPanel.id] = fileExplorerPanel
+        panelTitles[fileExplorerPanel.id] = fileExplorerPanel.displayTitle
+
+        guard let newTabId = bonsplitController.createTab(
+            title: fileExplorerPanel.displayTitle,
+            icon: fileExplorerPanel.displayIcon,
+            kind: SurfaceKind.fileExplorer,
+            isDirty: false,
+            isLoading: false,
+            isPinned: false,
+            inPane: paneId
+        ) else {
+            panels.removeValue(forKey: fileExplorerPanel.id)
+            panelTitles.removeValue(forKey: fileExplorerPanel.id)
+            return nil
+        }
+
+        surfaceIdToPanelId[newTabId] = fileExplorerPanel.id
+        if shouldFocusNewTab {
+            bonsplitController.focusPane(paneId)
+            bonsplitController.selectTab(newTabId)
+            applyTabSelection(tabId: newTabId, inPane: paneId)
+        } else {
+            preserveFocusAfterNonFocusSplit(
+                preferredPanelId: previousFocusedPanelId,
+                splitPanelId: fileExplorerPanel.id,
+                previousHostedView: previousHostedView
+            )
+        }
+
+        installFileExplorerPanelSubscription(fileExplorerPanel)
+        return fileExplorerPanel
     }
 
     /// Tear down all panels in this workspace, freeing their Ghostty surfaces.

@@ -5002,6 +5002,8 @@ struct ContentView: View {
             return String(localized: "commandPalette.kind.browser", defaultValue: "Browser")
         case .markdown:
             return String(localized: "commandPalette.kind.markdown", defaultValue: "Markdown")
+        case .fileExplorer:
+            return String(localized: "commandPalette.kind.fileExplorer", defaultValue: "File Explorer")
         }
     }
 
@@ -5013,6 +5015,8 @@ struct ContentView: View {
             return ["browser", "web", "page"]
         case .markdown:
             return ["markdown", "note", "preview"]
+        case .fileExplorer:
+            return ["file", "explorer", "files", "tree", "folder", "browse"]
         }
     }
 
