@@ -5008,6 +5008,8 @@ struct ContentView: View {
             return String(localized: "commandPalette.kind.markdown", defaultValue: "Markdown")
         case .fileExplorer:
             return String(localized: "commandPalette.kind.fileExplorer", defaultValue: "File Explorer")
+        case .editor:
+            return String(localized: "commandPalette.kind.editor", defaultValue: "Editor")
         }
     }
 
@@ -5021,6 +5023,8 @@ struct ContentView: View {
             return ["markdown", "note", "preview"]
         case .fileExplorer:
             return ["file", "explorer", "files", "tree", "folder", "browse"]
+        case .editor:
+            return ["editor", "text", "file", "edit", "notepad"]
         }
     }
 
@@ -7088,6 +7092,8 @@ struct ContentView: View {
             return "browser.addressBar"
         case .browser(.findField):
             return "browser.findField"
+        case .editor(.textView):
+            return "editor.textView"
         }
     }
 #endif

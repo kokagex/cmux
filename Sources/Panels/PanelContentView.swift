@@ -65,6 +65,8 @@ struct PanelContentView: View {
                     onRequestPanelFocus: onRequestPanelFocus
                 )
             }
+        case .editor:
+            EmptyView()
         }
     }
 }

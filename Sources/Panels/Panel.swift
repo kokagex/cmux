@@ -8,6 +8,7 @@ public enum PanelType: String, Codable, Sendable {
     case browser
     case markdown
     case fileExplorer
+    case editor
 }
 
 public enum TerminalPanelFocusIntent: Equatable {
@@ -21,10 +22,15 @@ public enum BrowserPanelFocusIntent: Equatable {
     case findField
 }
 
+public enum EditorPanelFocusIntent: Codable, Sendable {
+    case textView
+}
+
 public enum PanelFocusIntent: Equatable {
     case panel
     case terminal(TerminalPanelFocusIntent)
     case browser(BrowserPanelFocusIntent)
+    case editor(EditorPanelFocusIntent)
 }
 
 public enum WorkspaceAttentionFlashReason: String, Equatable, Sendable {

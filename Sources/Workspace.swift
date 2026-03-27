@@ -411,6 +411,7 @@ extension Workspace {
         let browserSnapshot: SessionBrowserPanelSnapshot?
         let markdownSnapshot: SessionMarkdownPanelSnapshot?
         let fileExplorerSnapshot: SessionFileExplorerPanelSnapshot?
+        let editorSnapshot: SessionEditorPanelSnapshot?
         switch panel.panelType {
         case .terminal:
             guard let terminalPanel = panel as? TerminalPanel else { return nil }
@@ -435,6 +436,7 @@ extension Workspace {
             browserSnapshot = nil
             markdownSnapshot = nil
             fileExplorerSnapshot = nil
+            editorSnapshot = nil
         case .browser:
             guard let browserPanel = panel as? BrowserPanel else { return nil }
             terminalSnapshot = nil
@@ -450,12 +452,14 @@ extension Workspace {
             )
             markdownSnapshot = nil
             fileExplorerSnapshot = nil
+            editorSnapshot = nil
         case .markdown:
             guard let markdownPanel = panel as? MarkdownPanel else { return nil }
             terminalSnapshot = nil
             browserSnapshot = nil
             markdownSnapshot = SessionMarkdownPanelSnapshot(filePath: markdownPanel.filePath)
             fileExplorerSnapshot = nil
+            editorSnapshot = nil
         case .fileExplorer:
             guard let fePanel = panel as? FileExplorerPanel else { return nil }
             terminalSnapshot = nil
@@ -469,6 +473,13 @@ extension Workspace {
                 showIgnoredFiles: fePanel.showIgnoredFiles,
                 openAction: fePanel.openAction.rawValue
             )
+            editorSnapshot = nil
+        case .editor:
+            terminalSnapshot = nil
+            browserSnapshot = nil
+            markdownSnapshot = nil
+            fileExplorerSnapshot = nil
+            editorSnapshot = nil
         }
 
         return SessionPanelSnapshot(
@@ -485,7 +496,8 @@ extension Workspace {
             terminal: terminalSnapshot,
             browser: browserSnapshot,
             markdown: markdownSnapshot,
-            fileExplorer: fileExplorerSnapshot
+            fileExplorer: fileExplorerSnapshot,
+            editor: editorSnapshot
         )
     }
 
@@ -689,6 +701,8 @@ extension Workspace {
             }
             applySessionPanelMetadata(snapshot, toPanelId: fileExplorerPanel.id)
             return fileExplorerPanel.id
+        case .editor:
+            return nil
         }
     }
 
@@ -5588,6 +5602,7 @@ final class Workspace: Identifiable, ObservableObject {
         static let browser = "browser"
         static let markdown = "markdown"
         static let fileExplorer = "fileExplorer"
+        static let editor = "editor"
     }
 
     enum PanelShellActivityState: String {
@@ -6121,6 +6136,8 @@ final class Workspace: Identifiable, ObservableObject {
             return SurfaceKind.markdown
         case .fileExplorer:
             return SurfaceKind.fileExplorer
+        case .editor:
+            return SurfaceKind.editor
         }
     }
 
@@ -10280,7 +10297,7 @@ extension Workspace: BonsplitDelegate {
         switch intent {
         case .browser(.addressBar), .browser(.findField), .terminal(.findField):
             return true
-        case .panel, .browser(.webView), .terminal(.surface):
+        case .panel, .browser(.webView), .terminal(.surface), .editor:
             return false
         }
     }
