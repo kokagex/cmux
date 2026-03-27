@@ -3469,12 +3469,6 @@ final class TerminalSurface: Identifiable, ObservableObject {
         }
     }
 
-    // Workaround: Swift -O whole-module optimization misallocates the sret
-    // buffer for ghostty_surface_config_new() (112 bytes) so it overlaps live
-    // stack slots (UUID VWT pointers, type metadata), causing null dereferences
-    // at launch. Disabling optimization for this function prevents the corrupt
-    // stack layout while keeping the rest of the binary optimized.
-    @_optimize(none)
     private func createSurface(for view: GhosttyNSView) {
         #if DEBUG
         let resourcesDir = getenv("GHOSTTY_RESOURCES_DIR").flatMap { String(cString: $0) } ?? "(unset)"
@@ -3494,48 +3488,24 @@ final class TerminalSurface: Identifiable, ObservableObject {
 
         let scaleFactors = scaleFactors(for: view)
 
-        var surfaceConfig = configTemplate ?? ghostty_surface_config_new()
-        surfaceConfig.platform_tag = GHOSTTY_PLATFORM_MACOS
-        surfaceConfig.platform = ghostty_platform_u(macos: ghostty_platform_macos_s(
-            nsview: Unmanaged.passUnretained(view).toOpaque()
-        ))
-        let callbackContext = Unmanaged.passRetained(GhosttySurfaceCallbackContext(surfaceView: view, terminalSurface: self))
-        surfaceConfig.userdata = callbackContext.toOpaque()
-        surfaceCallbackContext?.release()
-        surfaceCallbackContext = callbackContext
-        surfaceConfig.scale_factor = scaleFactors.layer
-        surfaceConfig.context = surfaceContext
-#if DEBUG
-        let templateFontText = String(format: "%.2f", surfaceConfig.font_size)
-        dlog(
-            "zoom.create surface=\(id.uuidString.prefix(5)) context=\(cmuxSurfaceContextName(surfaceContext)) " +
-            "templateFont=\(templateFontText)"
-        )
-#endif
-        var envVars: [ghostty_env_var_s] = []
-        var envStorage: [(UnsafeMutablePointer<CChar>, UnsafeMutablePointer<CChar>)] = []
-        defer {
-            for (key, value) in envStorage {
-                free(key)
-                free(value)
-            }
-        }
-
+        // Extract existing env vars from config template. Reading fields from
+        // the stored configTemplate is safe (no sret) — the template struct is
+        // already allocated as a stored property.
         var env: [String: String] = [:]
-        if surfaceConfig.env_var_count > 0, let existingEnv = surfaceConfig.env_vars {
+        if let template = configTemplate,
+           template.env_var_count > 0,
+           let existingEnv = template.env_vars {
             // Validate the env_vars pointer before dereferencing — it may be a
             // stale pointer from a ghostty_surface_inherited_config struct whose
             // backing memory was freed. This is a defense-in-depth check for
             // Intel Macs where freed memory is recycled aggressively (#1496, #1870).
             let envPointerLive = malloc_size(UnsafeRawPointer(existingEnv)) > 0
-            let count = envPointerLive ? Int(surfaceConfig.env_var_count) : 0
-            if count > 0 {
-                for i in 0..<count {
-                    let item = existingEnv[i]
-                    if let key = String(cString: item.key, encoding: .utf8),
-                       let value = String(cString: item.value, encoding: .utf8) {
-                        env[key] = value
-                    }
+            let count = envPointerLive ? Int(template.env_var_count) : 0
+            for i in 0..<count {
+                let item = existingEnv[i]
+                if let key = String(cString: item.key, encoding: .utf8),
+                   let value = String(cString: item.value, encoding: .utf8) {
+                    env[key] = value
                 }
             }
         }
@@ -3653,53 +3623,18 @@ final class TerminalSurface: Identifiable, ObservableObject {
             initialEnvironmentOverrides: initialEnvironmentOverrides
         )
 
-        if !env.isEmpty {
-            envVars.reserveCapacity(env.count)
-            envStorage.reserveCapacity(env.count)
-            for (key, value) in env {
-                guard let keyPtr = strdup(key), let valuePtr = strdup(value) else { continue }
-                envStorage.append((keyPtr, valuePtr))
-                envVars.append(ghostty_env_var_s(key: keyPtr, value: valuePtr))
-            }
-        }
-
-        let createSurface = { [self] in
-            if !envVars.isEmpty {
-                let envVarsCount = envVars.count
-                envVars.withUnsafeMutableBufferPointer { buffer in
-                    surfaceConfig.env_vars = buffer.baseAddress
-                    surfaceConfig.env_var_count = envVarsCount
-                    self.surface = ghostty_surface_new(app, &surfaceConfig)
-                }
-            } else {
-                self.surface = ghostty_surface_new(app, &surfaceConfig)
-            }
-        }
-
-        let createWithCommandAndWorkingDirectory = { [self] in
-            if let initialCommand, !initialCommand.isEmpty {
-                initialCommand.withCString { cCommand in
-                    surfaceConfig.command = cCommand
-                    if let workingDirectory, !workingDirectory.isEmpty {
-                        workingDirectory.withCString { cWorkingDir in
-                            surfaceConfig.working_directory = cWorkingDir
-                            createSurface()
-                        }
-                    } else {
-                        createSurface()
-                    }
-                }
-            } else if let workingDirectory, !workingDirectory.isEmpty {
-                workingDirectory.withCString { cWorkingDir in
-                    surfaceConfig.working_directory = cWorkingDir
-                    createSurface()
-                }
-            } else {
-                createSurface()
-            }
-        }
-
-        createWithCommandAndWorkingDirectory()
+        // All C interop (ghostty_surface_config_new, GhosttySurfaceCallbackContext,
+        // ghostty_surface_new) isolated in a separate @inline(never) stack frame to
+        // prevent Swift -O sret buffer overlap corruption on Intel Macs.
+        let (newSurface, newCallbackContext) = performSurfaceCreation(
+            app: app,
+            view: view,
+            layerScaleFactor: scaleFactors.layer,
+            env: env
+        )
+        surfaceCallbackContext?.release()
+        surfaceCallbackContext = newCallbackContext
+        surface = newSurface
 
         if surface == nil {
             surfaceCallbackContext?.release()
@@ -3804,6 +3739,96 @@ final class TerminalSurface: Identifiable, ObservableObject {
             "runtimeFont=\(runtimeFontText)"
         )
 #endif
+    }
+
+    // Isolates all C interop (ghostty_surface_config_new sret, callback context
+    // UUID allocation, ghostty_surface_new) in a dedicated stack frame. Swift -O
+    // whole-module optimization can misallocate the 112-byte sret buffer for
+    // ghostty_surface_config_new() so it overlaps live stack slots in a large
+    // function, corrupting UUID VWT pointers and type metadata. Keeping all
+    // C struct operations here (with @inline(never)) gives the sret buffer its
+    // own frame, preventing the overlap while leaving the rest of the binary
+    // fully optimized.
+    @inline(never)
+    private func performSurfaceCreation(
+        app: ghostty_app_t,
+        view: GhosttyNSView,
+        layerScaleFactor: CGFloat,
+        env: [String: String]
+    ) -> (surface: ghostty_surface_t?, callbackContext: Unmanaged<GhosttySurfaceCallbackContext>) {
+        var surfaceConfig = configTemplate ?? ghostty_surface_config_new()
+        surfaceConfig.platform_tag = GHOSTTY_PLATFORM_MACOS
+        surfaceConfig.platform = ghostty_platform_u(macos: ghostty_platform_macos_s(
+            nsview: Unmanaged.passUnretained(view).toOpaque()
+        ))
+        let callbackContext = Unmanaged.passRetained(GhosttySurfaceCallbackContext(surfaceView: view, terminalSurface: self))
+        surfaceConfig.userdata = callbackContext.toOpaque()
+        surfaceConfig.scale_factor = layerScaleFactor
+        surfaceConfig.context = surfaceContext
+#if DEBUG
+        let templateFontText = String(format: "%.2f", surfaceConfig.font_size)
+        dlog(
+            "zoom.create surface=\(id.uuidString.prefix(5)) context=\(cmuxSurfaceContextName(surfaceContext)) " +
+            "templateFont=\(templateFontText)"
+        )
+#endif
+
+        var envVars: [ghostty_env_var_s] = []
+        var envStorage: [(UnsafeMutablePointer<CChar>, UnsafeMutablePointer<CChar>)] = []
+        defer {
+            for (key, value) in envStorage {
+                free(key)
+                free(value)
+            }
+        }
+
+        if !env.isEmpty {
+            envVars.reserveCapacity(env.count)
+            envStorage.reserveCapacity(env.count)
+            for (key, value) in env {
+                guard let keyPtr = strdup(key), let valuePtr = strdup(value) else { continue }
+                envStorage.append((keyPtr, valuePtr))
+                envVars.append(ghostty_env_var_s(key: keyPtr, value: valuePtr))
+            }
+        }
+
+        var resultSurface: ghostty_surface_t?
+
+        let doCreateSurface = {
+            if !envVars.isEmpty {
+                let envVarsCount = envVars.count
+                envVars.withUnsafeMutableBufferPointer { buffer in
+                    surfaceConfig.env_vars = buffer.baseAddress
+                    surfaceConfig.env_var_count = envVarsCount
+                    resultSurface = ghostty_surface_new(app, &surfaceConfig)
+                }
+            } else {
+                resultSurface = ghostty_surface_new(app, &surfaceConfig)
+            }
+        }
+
+        if let initialCommand, !initialCommand.isEmpty {
+            initialCommand.withCString { cCommand in
+                surfaceConfig.command = cCommand
+                if let workingDirectory, !workingDirectory.isEmpty {
+                    workingDirectory.withCString { cWorkingDir in
+                        surfaceConfig.working_directory = cWorkingDir
+                        doCreateSurface()
+                    }
+                } else {
+                    doCreateSurface()
+                }
+            }
+        } else if let workingDirectory, !workingDirectory.isEmpty {
+            workingDirectory.withCString { cWorkingDir in
+                surfaceConfig.working_directory = cWorkingDir
+                doCreateSurface()
+            }
+        } else {
+            doCreateSurface()
+        }
+
+        return (resultSurface, callbackContext)
     }
 
     @discardableResult
