@@ -10,14 +10,23 @@ struct FileExplorerOutlineView: NSViewRepresentable {
 
     // MARK: - Coordinator
 
-    func makeCoordinator() -> FileExplorerDataSource {
-        let coordinator = FileExplorerDataSource()
-        coordinator.panel = panel
-        coordinator.onFileDoubleClick = onFileOpen
-        coordinator.onNodeExpand = { [weak panel] node in
-            panel?.refreshExpandedNode(node)
+    @MainActor
+    final class Coordinator {
+        let dataSource: FileExplorerDataSource
+        var lastRenderedGeneration: Int = -1
+
+        init(panel: FileExplorerPanel, onFileOpen: @escaping (FileNode) -> Void) {
+            self.dataSource = FileExplorerDataSource()
+            self.dataSource.panel = panel
+            self.dataSource.onFileDoubleClick = onFileOpen
+            self.dataSource.onNodeExpand = { [weak panel] node in
+                panel?.refreshExpandedNode(node)
+            }
         }
-        return coordinator
+    }
+
+    func makeCoordinator() -> Coordinator {
+        Coordinator(panel: panel, onFileOpen: onFileOpen)
     }
 
     // MARK: - NSViewRepresentable
@@ -43,12 +52,14 @@ struct FileExplorerOutlineView: NSViewRepresentable {
         outlineView.addTableColumn(column)
         outlineView.outlineTableColumn = column
 
+        let ds = context.coordinator.dataSource
+
         // Wire data source and delegate
-        outlineView.dataSource = context.coordinator
-        outlineView.delegate = context.coordinator
+        outlineView.dataSource = ds
+        outlineView.delegate = ds
 
         // Double-click action
-        outlineView.target = context.coordinator
+        outlineView.target = ds
         outlineView.doubleAction = #selector(FileExplorerDataSource.handleDoubleClick(_:))
 
         // Drag-and-drop registration
@@ -56,7 +67,7 @@ struct FileExplorerOutlineView: NSViewRepresentable {
         outlineView.setDraggingSourceOperationMask(.move, forLocal: true)
 
         // Context menu
-        outlineView.menu = buildContextMenu(coordinator: context.coordinator)
+        outlineView.menu = buildContextMenu(coordinator: ds)
 
         // Mount in scroll view
         scrollView.documentView = outlineView
@@ -65,14 +76,46 @@ struct FileExplorerOutlineView: NSViewRepresentable {
     }
 
     func updateNSView(_ scrollView: NSScrollView, context: Context) {
-        context.coordinator.panel = panel
+        let coordinator = context.coordinator
+        coordinator.dataSource.panel = panel
 
         guard let outlineView = scrollView.documentView as? NSOutlineView else { return }
 
+        // Only reload when the tree data actually changed
+        let currentGen = panel.treeGeneration
+        guard coordinator.lastRenderedGeneration != currentGen else { return }
+        coordinator.lastRenderedGeneration = currentGen
+
+        // Save expanded paths before reload
+        let expandedPaths = collectExpandedPaths(outlineView: outlineView)
+
         outlineView.reloadData()
 
-        // Restore expanded state
-        restoreExpandedState(outlineView: outlineView, nodes: panel.rootNodes)
+        // Restore expanded state by matching URL paths
+        restoreExpandedPaths(outlineView: outlineView, nodes: panel.rootNodes, expandedPaths: expandedPaths)
+    }
+
+    /// Collect the URL paths of all currently expanded items.
+    private func collectExpandedPaths(outlineView: NSOutlineView) -> Set<String> {
+        var paths = Set<String>()
+        for row in 0..<outlineView.numberOfRows {
+            guard let node = outlineView.item(atRow: row) as? FileNode,
+                  outlineView.isItemExpanded(node) else { continue }
+            paths.insert(node.url.path)
+        }
+        return paths
+    }
+
+    /// Expand nodes whose URL path was previously expanded.
+    private func restoreExpandedPaths(outlineView: NSOutlineView, nodes: [FileNode], expandedPaths: Set<String>) {
+        for node in nodes {
+            guard node.isDirectory, expandedPaths.contains(node.url.path) else { continue }
+            outlineView.expandItem(node)
+            node.isExpanded = true
+            if let children = node.children {
+                restoreExpandedPaths(outlineView: outlineView, nodes: children, expandedPaths: expandedPaths)
+            }
+        }
     }
 
     // MARK: - Context menu
@@ -135,15 +178,4 @@ struct FileExplorerOutlineView: NSViewRepresentable {
         return menu
     }
 
-    // MARK: - Expanded state restoration
-
-    private func restoreExpandedState(outlineView: NSOutlineView, nodes: [FileNode]) {
-        for node in nodes {
-            guard node.isDirectory && node.isExpanded else { continue }
-            outlineView.expandItem(node)
-            if let children = node.children {
-                restoreExpandedState(outlineView: outlineView, nodes: children)
-            }
-        }
-    }
 }

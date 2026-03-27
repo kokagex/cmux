@@ -86,19 +86,50 @@ final class FileExplorerPanel: Panel, ObservableObject {
 
     // MARK: - Init
 
+    /// Generation counter incremented each time rootNodes changes.
+    /// Used by the outline view to avoid unnecessary reloads.
+    @Published private(set) var treeGeneration: Int = 0
+
     init(workspaceId: UUID, rootPath: String) {
         self.id = UUID()
         self.workspaceId = workspaceId
-        self.rootPath = rootPath
-        self.displayTitle = (rootPath as NSString).lastPathComponent
 
-        let provider = GitStatusProvider(rootPath: rootPath)
+        // Resolve to git repo root if possible
+        let resolvedRoot = Self.gitRepoRoot(for: rootPath) ?? rootPath
+        self.rootPath = resolvedRoot
+        self.displayTitle = (resolvedRoot as NSString).lastPathComponent
+
+        let provider = GitStatusProvider(rootPath: resolvedRoot)
         self.gitStatusProvider = provider
 
         reloadTree()
         startFSEventStream()
         refreshIgnoredPaths()
         refreshGitStatus()
+    }
+
+    /// Returns the git repository root for the given path, or nil if not in a git repo.
+    private static func gitRepoRoot(for path: String) -> String? {
+        let process = Process()
+        let pipe = Pipe()
+        process.executableURL = URL(fileURLWithPath: "/usr/bin/git")
+        process.arguments = ["rev-parse", "--show-toplevel"]
+        process.currentDirectoryURL = URL(fileURLWithPath: path)
+        process.standardOutput = pipe
+        process.standardError = FileHandle.nullDevice
+
+        do {
+            try process.run()
+            process.waitUntilExit()
+        } catch {
+            return nil
+        }
+
+        guard process.terminationStatus == 0 else { return nil }
+        let data = pipe.fileHandleForReading.readDataToEndOfFile()
+        guard let output = String(data: data, encoding: .utf8)?.trimmingCharacters(in: .whitespacesAndNewlines),
+              !output.isEmpty else { return nil }
+        return output
     }
 
     // MARK: - Panel protocol
@@ -137,6 +168,7 @@ final class FileExplorerPanel: Panel, ObservableObject {
         let nodes = rootNode.children ?? []
         rootNodes = nodes
         applyGitStatuses(gitStatuses, to: rootNodes)
+        treeGeneration += 1
     }
 
     /// Reloads children for a specific node (e.g., when it is expanded).
