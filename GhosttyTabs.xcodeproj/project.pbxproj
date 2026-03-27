@@ -33,6 +33,7 @@
 		A5001404 /* BrowserPanelView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A5001414 /* BrowserPanelView.swift */; };
 		A5007420 /* BrowserPopupWindowController.swift in Sources */ = {isa = PBXBuildFile; fileRef = A5007421 /* BrowserPopupWindowController.swift */; };
 		A5001420 /* MarkdownPanel.swift in Sources */ = {isa = PBXBuildFile; fileRef = A5001418 /* MarkdownPanel.swift */; };
+		FE100010 /* FileWatcherHelper.swift in Sources */ = {isa = PBXBuildFile; fileRef = FE200010 /* FileWatcherHelper.swift */; };
 		A5001421 /* MarkdownPanelView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A5001419 /* MarkdownPanelView.swift */; };
 		FE100001 /* FileNode.swift in Sources */ = {isa = PBXBuildFile; fileRef = FE200001 /* FileNode.swift */; };
 		FE100002 /* FileIconMapper.swift in Sources */ = {isa = PBXBuildFile; fileRef = FE200002 /* FileIconMapper.swift */; };
@@ -220,6 +221,7 @@
 		A5007421 /* BrowserPopupWindowController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Panels/BrowserPopupWindowController.swift; sourceTree = "<group>"; };
 		A5001415 /* PanelContentView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Panels/PanelContentView.swift; sourceTree = "<group>"; };
 		A5001418 /* MarkdownPanel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Panels/MarkdownPanel.swift; sourceTree = "<group>"; };
+		FE200010 /* FileWatcherHelper.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Panels/FileWatcherHelper.swift; sourceTree = "<group>"; };
 		A5001419 /* MarkdownPanelView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Panels/MarkdownPanelView.swift; sourceTree = "<group>"; };
 		FE200001 /* FileNode.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Panels/FileNode.swift; sourceTree = "<group>"; };
 		FE200002 /* FileIconMapper.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Panels/FileIconMapper.swift; sourceTree = "<group>"; };
@@ -461,6 +463,7 @@
 				A5007421 /* BrowserPopupWindowController.swift */,
 				A5001418 /* MarkdownPanel.swift */,
 				A5001419 /* MarkdownPanelView.swift */,
+				FE200010 /* FileWatcherHelper.swift */,
 				FE200001 /* FileNode.swift */,
 				FE200002 /* FileIconMapper.swift */,
 				FE200003 /* GitStatusProvider.swift */,
@@ -767,6 +770,7 @@
 				A5007420 /* BrowserPopupWindowController.swift in Sources */,
 				A5001420 /* MarkdownPanel.swift in Sources */,
 				A5001421 /* MarkdownPanelView.swift in Sources */,
+				FE100010 /* FileWatcherHelper.swift in Sources */,
 				FE100001 /* FileNode.swift in Sources */,
 				FE100002 /* FileIconMapper.swift in Sources */,
 				FE100003 /* GitStatusProvider.swift in Sources */,

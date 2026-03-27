@@ -31,17 +31,7 @@ final class MarkdownPanel: Panel, ObservableObject {
 
     // MARK: - File watching
 
-    // nonisolated(unsafe) because deinit is not guaranteed to run on the
-    // main actor, but DispatchSource.cancel() is thread-safe.
-    private nonisolated(unsafe) var fileWatchSource: DispatchSourceFileSystemObject?
-    private var fileDescriptor: Int32 = -1
-    private var isClosed: Bool = false
-    private let watchQueue = DispatchQueue(label: "com.cmux.markdown-file-watch", qos: .utility)
-
-    /// Maximum number of reattach attempts after a file delete/rename event.
-    private static let maxReattachAttempts = 6
-    /// Delay between reattach attempts (total window: attempts * delay = 3s).
-    private static let reattachDelay: TimeInterval = 0.5
+    private var fileWatcher: FileWatcherHelper?
 
     // MARK: - Init
 
@@ -52,12 +42,27 @@ final class MarkdownPanel: Panel, ObservableObject {
         self.displayTitle = (filePath as NSString).lastPathComponent
 
         loadFileContent()
-        startFileWatcher()
-        if isFileUnavailable && fileWatchSource == nil {
-            // Session restore can create a panel before the file is recreated.
-            // Retry briefly so atomic-rename recreations can reconnect.
-            scheduleReattach(attempt: 1)
-        }
+
+        let watcher = FileWatcherHelper(
+            onChange: { [weak self] kind in
+                guard let self else { return }
+                switch kind {
+                case .contentChanged:
+                    self.loadFileContent()
+                case .deletedOrRenamed:
+                    self.loadFileContent()
+                    // Reattach to the new inode. If the file is not yet
+                    // available, reattach() starts the retry loop.
+                    self.fileWatcher?.reattach()
+                }
+            },
+            onReattach: { [weak self] in
+                // File reappeared after retry — reload content.
+                self?.loadFileContent()
+            }
+        )
+        self.fileWatcher = watcher
+        watcher.start(filePath: filePath)
     }
 
     // MARK: - Panel protocol
@@ -71,8 +76,8 @@ final class MarkdownPanel: Panel, ObservableObject {
     }
 
     func close() {
-        isClosed = true
-        stopFileWatcher()
+        fileWatcher?.stop()
+        fileWatcher = nil
     }
 
     func triggerFlash(reason: WorkspaceAttentionFlashReason) {
@@ -99,86 +104,5 @@ final class MarkdownPanel: Panel, ObservableObject {
                 isFileUnavailable = true
             }
         }
-    }
-
-    // MARK: - File watcher via DispatchSource
-
-    private func startFileWatcher() {
-        let fd = open(filePath, O_EVTONLY)
-        guard fd >= 0 else { return }
-        fileDescriptor = fd
-
-        let source = DispatchSource.makeFileSystemObjectSource(
-            fileDescriptor: fd,
-            eventMask: [.write, .delete, .rename, .extend],
-            queue: watchQueue
-        )
-
-        source.setEventHandler { [weak self] in
-            guard let self else { return }
-            let flags = source.data
-            if flags.contains(.delete) || flags.contains(.rename) {
-                // File was deleted or renamed. The old file descriptor points to
-                // a stale inode, so we must always stop and reattach the watcher
-                // even if the new file is already readable (atomic save case).
-                DispatchQueue.main.async {
-                    self.stopFileWatcher()
-                    self.loadFileContent()
-                    if self.isFileUnavailable {
-                        // File not yet replaced — retry until it reappears.
-                        self.scheduleReattach(attempt: 1)
-                    } else {
-                        // File already replaced — reattach to the new inode immediately.
-                        self.startFileWatcher()
-                    }
-                }
-            } else {
-                // Content changed — reload.
-                DispatchQueue.main.async {
-                    self.loadFileContent()
-                }
-            }
-        }
-
-        source.setCancelHandler {
-            Darwin.close(fd)
-        }
-
-        source.resume()
-        fileWatchSource = source
-    }
-
-    /// Retry reattaching the file watcher up to `maxReattachAttempts` times.
-    /// Each attempt checks if the file has reappeared. Bails out early if
-    /// the panel has been closed.
-    private func scheduleReattach(attempt: Int) {
-        guard attempt <= Self.maxReattachAttempts else { return }
-        watchQueue.asyncAfter(deadline: .now() + Self.reattachDelay) { [weak self] in
-            guard let self else { return }
-            DispatchQueue.main.async {
-                guard !self.isClosed else { return }
-                if FileManager.default.fileExists(atPath: self.filePath) {
-                    self.isFileUnavailable = false
-                    self.loadFileContent()
-                    self.startFileWatcher()
-                } else {
-                    self.scheduleReattach(attempt: attempt + 1)
-                }
-            }
-        }
-    }
-
-    private func stopFileWatcher() {
-        if let source = fileWatchSource {
-            source.cancel()
-            fileWatchSource = nil
-        }
-        // File descriptor is closed by the cancel handler.
-        fileDescriptor = -1
-    }
-
-    deinit {
-        // DispatchSource cancel is safe from any thread.
-        fileWatchSource?.cancel()
     }
 }
