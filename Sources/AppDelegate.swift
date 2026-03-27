@@ -9775,6 +9775,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
             return true
         }
 
+        // Open file explorer: Cmd+Shift+E
+        if matchShortcut(event: event, shortcut: KeyboardShortcutSettings.shortcut(for: .openFileExplorer)) {
+            _ = tabManager?.openFileExplorer()
+            return true
+        }
+
         // Safari defaults:
         // - Option+Command+I => Show/Toggle Web Inspector
         // - Option+Command+C => Show JavaScript Console
