@@ -69,6 +69,9 @@ struct FileExplorerOutlineView: NSViewRepresentable {
         // Context menu
         outlineView.menu = buildContextMenu(coordinator: ds)
 
+        // Store reference so context menu actions can find the outline view
+        ds.outlineView = outlineView
+
         // Mount in scroll view
         scrollView.documentView = outlineView
 

@@ -7,6 +7,7 @@ import UniformTypeIdentifiers
 final class FileExplorerDataSource: NSObject, NSOutlineViewDataSource, NSOutlineViewDelegate {
 
     weak var panel: FileExplorerPanel?
+    weak var outlineView: NSOutlineView?
     var onFileDoubleClick: ((FileNode) -> Void)?
     var onNodeExpand: ((FileNode) -> Void)?
 
@@ -147,18 +148,9 @@ final class FileExplorerDataSource: NSObject, NSOutlineViewDataSource, NSOutline
     }
 
     @objc func contextNewFile(_ sender: Any?) {
-        guard let outlineView = sender as? NSOutlineView ?? (sender as? NSMenuItem)?.representedObject as? NSOutlineView,
-              let node = clickedDirectoryNode(in: outlineView),
-              let panel
-        else { return }
+        guard let node = clickedNode(), let panel else { return }
 
-        let dirURL: URL
-        if node.isDirectory {
-            dirURL = node.url
-        } else {
-            dirURL = node.url.deletingLastPathComponent()
-        }
-
+        let dirURL = node.isDirectory ? node.url : node.url.deletingLastPathComponent()
         var destURL = dirURL.appendingPathComponent("untitled")
         var counter = 1
         while FileManager.default.fileExists(atPath: destURL.path) {
@@ -170,18 +162,9 @@ final class FileExplorerDataSource: NSObject, NSOutlineViewDataSource, NSOutline
     }
 
     @objc func contextNewFolder(_ sender: Any?) {
-        guard let outlineView = sender as? NSOutlineView ?? (sender as? NSMenuItem)?.representedObject as? NSOutlineView,
-              let node = clickedDirectoryNode(in: outlineView),
-              let panel
-        else { return }
+        guard let node = clickedNode(), let panel else { return }
 
-        let dirURL: URL
-        if node.isDirectory {
-            dirURL = node.url
-        } else {
-            dirURL = node.url.deletingLastPathComponent()
-        }
-
+        let dirURL = node.isDirectory ? node.url : node.url.deletingLastPathComponent()
         var destURL = dirURL.appendingPathComponent("untitled folder")
         var counter = 1
         while FileManager.default.fileExists(atPath: destURL.path) {
@@ -197,38 +180,28 @@ final class FileExplorerDataSource: NSObject, NSOutlineViewDataSource, NSOutline
     }
 
     @objc func contextDelete(_ sender: Any?) {
-        guard let outlineView = sender as? NSOutlineView ?? (sender as? NSMenuItem)?.representedObject as? NSOutlineView,
-              let node = clickedNode(in: outlineView)
-        else { return }
+        guard let node = clickedNode() else { return }
         NSWorkspace.shared.recycle([node.url]) { _, _ in }
     }
 
     @objc func contextShowInFinder(_ sender: Any?) {
-        guard let outlineView = sender as? NSOutlineView ?? (sender as? NSMenuItem)?.representedObject as? NSOutlineView,
-              let node = clickedNode(in: outlineView)
-        else { return }
+        guard let node = clickedNode() else { return }
         NSWorkspace.shared.activateFileViewerSelecting([node.url])
     }
 
     @objc func contextCopyPath(_ sender: Any?) {
-        guard let outlineView = sender as? NSOutlineView ?? (sender as? NSMenuItem)?.representedObject as? NSOutlineView,
-              let node = clickedNode(in: outlineView)
-        else { return }
+        guard let node = clickedNode() else { return }
         NSPasteboard.general.clearContents()
         NSPasteboard.general.setString(node.url.path, forType: .string)
     }
 
     // MARK: - Helpers
 
-    private func clickedNode(in outlineView: NSOutlineView) -> FileNode? {
+    private func clickedNode() -> FileNode? {
+        guard let outlineView else { return nil }
         let row = outlineView.clickedRow >= 0 ? outlineView.clickedRow : outlineView.selectedRow
         guard row >= 0 else { return nil }
         return outlineView.item(atRow: row) as? FileNode
-    }
-
-    private func clickedDirectoryNode(in outlineView: NSOutlineView) -> FileNode? {
-        guard let node = clickedNode(in: outlineView) else { return nil }
-        return node
     }
 }
 
