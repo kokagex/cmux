@@ -22779,6 +22779,23 @@
         }
       }
     },
+    "commandPalette.kind.editor": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Editor"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "エディタ"
+          }
+        }
+      }
+    },
     "commandPalette.kind.terminal": {
       "extractionState": "manual",
       "localizations": {
@@ -78924,6 +78941,23 @@
           "stringUnit": {
             "state": "translated",
             "value": "ドロップされたファイルのアップロードに失敗しました: %@"
+          }
+        }
+      }
+    },
+    "editorPanel.fileUnavailable": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "File not available"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "ファイルが見つかりません"
           }
         }
       }
