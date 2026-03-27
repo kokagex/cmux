@@ -12,7 +12,7 @@ struct FileExplorerPanelView: View {
 
     @State private var focusFlashOpacity: Double = 0.0
     @State private var focusFlashAnimationGeneration: Int = 0
-    @Environment(\.colorScheme) private var colorScheme
+
 
     var body: some View {
         VStack(spacing: 0) {
@@ -131,9 +131,7 @@ struct FileExplorerPanelView: View {
     }
 
     private var backgroundColor: Color {
-        colorScheme == .dark
-            ? Color(nsColor: NSColor(white: 0.12, alpha: 1.0))
-            : Color(nsColor: NSColor(white: 0.98, alpha: 1.0))
+        Color(nsColor: GhosttyBackgroundTheme.currentColor())
     }
 
     private func changeRootPath() {

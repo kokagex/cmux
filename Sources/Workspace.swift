@@ -469,7 +469,7 @@ extension Workspace {
                 rootPath: fePanel.rootPath,
                 expandedPaths: collectExpandedPaths(fePanel.rootNodes),
                 selectedPath: nil,
-                showHiddenFiles: fePanel.showHiddenFiles,
+                showHiddenFiles: true,
                 showIgnoredFiles: fePanel.showIgnoredFiles,
                 openAction: fePanel.openAction.rawValue
             )
@@ -697,7 +697,6 @@ extension Workspace {
                 return nil
             }
             if let feSnapshot = snapshot.fileExplorer {
-                fileExplorerPanel.showHiddenFiles = feSnapshot.showHiddenFiles
                 fileExplorerPanel.showIgnoredFiles = feSnapshot.showIgnoredFiles
                 if let action = FileExplorerOpenAction(rawValue: feSnapshot.openAction) {
                     fileExplorerPanel.openAction = action
