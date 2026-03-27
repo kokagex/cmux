@@ -3469,6 +3469,12 @@ final class TerminalSurface: Identifiable, ObservableObject {
         }
     }
 
+    // Workaround: Swift -O whole-module optimization misallocates the sret
+    // buffer for ghostty_surface_config_new() (112 bytes) so it overlaps live
+    // stack slots (UUID VWT pointers, type metadata), causing null dereferences
+    // at launch. Disabling optimization for this function prevents the corrupt
+    // stack layout while keeping the rest of the binary optimized.
+    @_optimize(none)
     private func createSurface(for view: GhosttyNSView) {
         #if DEBUG
         let resourcesDir = getenv("GHOSTTY_RESOURCES_DIR").flatMap { String(cString: $0) } ?? "(unset)"
