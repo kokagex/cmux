@@ -86,13 +86,23 @@ struct FileExplorerOutlineView: NSViewRepresentable {
         guard coordinator.lastRenderedGeneration != currentGen else { return }
         coordinator.lastRenderedGeneration = currentGen
 
-        // Save expanded paths before reload
+        // Save state before reload
         let expandedPaths = collectExpandedPaths(outlineView: outlineView)
+        let selectedPaths = collectSelectedPaths(outlineView: outlineView)
+        let scrollPosition = outlineView.enclosingScrollView?.contentView.bounds.origin
 
         outlineView.reloadData()
 
         // Restore expanded state by matching URL paths
         restoreExpandedPaths(outlineView: outlineView, nodes: panel.rootNodes, expandedPaths: expandedPaths)
+
+        // Restore selection
+        restoreSelectedPaths(outlineView: outlineView, selectedPaths: selectedPaths)
+
+        // Restore scroll position
+        if let scrollPosition {
+            outlineView.enclosingScrollView?.contentView.scroll(to: scrollPosition)
+        }
     }
 
     /// Collect the URL paths of all currently expanded items.
@@ -104,6 +114,30 @@ struct FileExplorerOutlineView: NSViewRepresentable {
             paths.insert(node.url.path)
         }
         return paths
+    }
+
+    /// Collect the URL paths of all currently selected items.
+    private func collectSelectedPaths(outlineView: NSOutlineView) -> Set<String> {
+        var paths = Set<String>()
+        for row in outlineView.selectedRowIndexes {
+            guard let node = outlineView.item(atRow: row) as? FileNode else { continue }
+            paths.insert(node.url.path)
+        }
+        return paths
+    }
+
+    /// Re-select rows whose URL path was previously selected.
+    private func restoreSelectedPaths(outlineView: NSOutlineView, selectedPaths: Set<String>) {
+        guard !selectedPaths.isEmpty else { return }
+        var indexSet = IndexSet()
+        for row in 0..<outlineView.numberOfRows {
+            guard let node = outlineView.item(atRow: row) as? FileNode,
+                  selectedPaths.contains(node.url.path) else { continue }
+            indexSet.insert(row)
+        }
+        if !indexSet.isEmpty {
+            outlineView.selectRowIndexes(indexSet, byExtendingSelection: false)
+        }
     }
 
     /// Expand nodes whose URL path was previously expanded.
