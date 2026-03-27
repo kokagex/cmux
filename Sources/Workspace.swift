@@ -5474,6 +5474,9 @@ final class Workspace: Identifiable, ObservableObject {
     /// a panel is explicitly re-zoomed by the user.
     private var terminalInheritanceFontPointsByPanelId: [UUID: Float] = [:]
 
+    /// ID of the current preview (temporary) editor panel in this workspace.
+    var previewEditorPanelId: UUID?
+
     /// Callback used by TabManager to capture recently closed browser panels for Cmd+Shift+T restore.
     var onClosedBrowserPanel: ((ClosedBrowserPanelRestoreSnapshot) -> Void)?
     weak var owningTabManager: TabManager?
@@ -6087,6 +6090,38 @@ final class Workspace: Identifiable, ObservableObject {
                 )
             }
         panelSubscriptions[fileExplorerPanel.id] = subscription
+    }
+
+    private func installEditorPanelSubscription(_ editorPanel: EditorPanel) {
+        let subscription = Publishers.CombineLatest3(
+            editorPanel.$displayTitle.removeDuplicates(),
+            editorPanel.$isDirty.removeDuplicates(),
+            editorPanel.$isPreview.removeDuplicates()
+        )
+        .receive(on: DispatchQueue.main)
+        .sink { [weak self, weak editorPanel] newTitle, isDirty, isPreview in
+            guard let self,
+                  let editorPanel,
+                  let tabId = self.surfaceIdFromPanelId(editorPanel.id) else { return }
+
+            // Sync title
+            if self.panelTitles[editorPanel.id] != newTitle {
+                self.panelTitles[editorPanel.id] = newTitle
+            }
+            let resolvedTitle = self.resolvedPanelTitle(panelId: editorPanel.id, fallback: newTitle)
+            self.bonsplitController.updateTab(
+                tabId,
+                title: resolvedTitle,
+                hasCustomTitle: self.panelCustomTitles[editorPanel.id] != nil,
+                isDirty: isDirty
+            )
+
+            // Track preview → pinned promotion
+            if !isPreview && self.previewEditorPanelId == editorPanel.id {
+                self.previewEditorPanelId = nil
+            }
+        }
+        panelSubscriptions[editorPanel.id] = subscription
     }
 
     private func browserRemoteWorkspaceStatusSnapshot() -> BrowserRemoteWorkspaceStatus? {
@@ -8059,6 +8094,89 @@ final class Workspace: Identifiable, ObservableObject {
         installFileExplorerPanelSubscription(fileExplorerPanel)
         fileExplorerPanel.bindToWorkspaceDirectory(self)
         return fileExplorerPanel
+    }
+
+    // MARK: - Editor Panel
+
+    private func editorPanelId(for filePath: String) -> UUID? {
+        for (id, panel) in panels {
+            if let editor = panel as? EditorPanel, editor.filePath == filePath {
+                return id
+            }
+        }
+        return nil
+    }
+
+    @discardableResult
+    func newEditorSurface(
+        inPane paneId: PaneID,
+        filePath: String,
+        isPreview: Bool = false,
+        focus: Bool? = nil
+    ) -> EditorPanel? {
+        // 1. If file already open in a pinned editor, focus it
+        if let existingId = editorPanelId(for: filePath),
+           let existingEditor = panels[existingId] as? EditorPanel,
+           !existingEditor.isPreview {
+            if focus != false { focusPanel(existingId) }
+            return existingEditor
+        }
+
+        // 2. If preview and existing preview tab, reuse it
+        if isPreview, let previewId = previewEditorPanelId,
+           let existingPreview = panels[previewId] as? EditorPanel {
+            existingPreview.replaceFile(filePath)
+            if let tabId = surfaceIdFromPanelId(previewId) {
+                bonsplitController.updateTab(tabId, title: existingPreview.displayTitle, icon: existingPreview.displayIcon)
+                panelTitles[previewId] = existingPreview.displayTitle
+            }
+            if focus != false { focusPanel(previewId) }
+            return existingPreview
+        }
+
+        // 3. Create new tab (follows newMarkdownSurface pattern)
+        let shouldFocusNewTab = focus ?? (bonsplitController.focusedPaneId == paneId)
+        let previousFocusedPanelId = focusedPanelId
+        let previousHostedView = focusedTerminalPanel?.hostedView
+
+        let editorPanel = EditorPanel(workspaceId: id, filePath: filePath, isPreview: isPreview)
+        panels[editorPanel.id] = editorPanel
+        panelTitles[editorPanel.id] = editorPanel.displayTitle
+
+        guard let newTabId = bonsplitController.createTab(
+            title: editorPanel.displayTitle,
+            icon: editorPanel.displayIcon,
+            kind: SurfaceKind.editor,
+            isDirty: editorPanel.isDirty,
+            isLoading: false,
+            isPinned: false,
+            inPane: paneId
+        ) else {
+            panels.removeValue(forKey: editorPanel.id)
+            panelTitles.removeValue(forKey: editorPanel.id)
+            return nil
+        }
+
+        surfaceIdToPanelId[newTabId] = editorPanel.id
+
+        if isPreview {
+            previewEditorPanelId = editorPanel.id
+        }
+
+        if shouldFocusNewTab {
+            bonsplitController.focusPane(paneId)
+            bonsplitController.selectTab(newTabId)
+            applyTabSelection(tabId: newTabId, inPane: paneId)
+        } else {
+            preserveFocusAfterNonFocusSplit(
+                preferredPanelId: previousFocusedPanelId,
+                splitPanelId: editorPanel.id,
+                previousHostedView: previousHostedView
+            )
+        }
+
+        installEditorPanelSubscription(editorPanel)
+        return editorPanel
     }
 
     /// Tear down all panels in this workspace, freeing their Ghostty surfaces.
@@ -10515,6 +10633,9 @@ extension Workspace: BonsplitDelegate {
         if lastTerminalConfigInheritancePanelId == panelId {
             lastTerminalConfigInheritancePanelId = nil
         }
+        if previewEditorPanelId == panelId {
+            previewEditorPanelId = nil
+        }
         clearRemoteConfigurationIfWorkspaceBecameLocal()
         if !isDetaching, let transferredRemoteCleanupConfiguration {
             Self.requestSSHControlMasterCleanupIfNeeded(configuration: transferredRemoteCleanupConfiguration)
@@ -10664,6 +10785,9 @@ extension Workspace: BonsplitDelegate {
                 surfaceListeningPorts.removeValue(forKey: panelId)
                 restoredTerminalScrollbackByPanelId.removeValue(forKey: panelId)
                 PortScanner.shared.unregisterPanel(workspaceId: id, panelId: panelId)
+                if previewEditorPanelId == panelId {
+                    previewEditorPanelId = nil
+                }
             }
 
             let closedSet = Set(closedPanelIds)
