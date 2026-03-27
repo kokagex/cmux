@@ -23,10 +23,13 @@ final class FileExplorerDataSource: NSObject, NSOutlineViewDataSource, NSOutline
 
     func outlineView(_ outlineView: NSOutlineView, child index: Int, ofItem item: Any?) -> Any {
         if item == nil {
-            return panel!.rootNodes[index]
+            guard let panel else { return FileNode(url: URL(fileURLWithPath: "/"), name: "/", isDirectory: true) }
+            return panel.rootNodes[index]
         }
-        let node = item as! FileNode
-        return node.children![index]
+        guard let node = item as? FileNode, let children = node.children else {
+            return FileNode(url: URL(fileURLWithPath: "/"), name: "/", isDirectory: true)
+        }
+        return children[index]
     }
 
     func outlineView(_ outlineView: NSOutlineView, isItemExpandable item: Any) -> Bool {

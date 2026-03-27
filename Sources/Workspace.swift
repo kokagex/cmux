@@ -457,21 +457,18 @@ extension Workspace {
             markdownSnapshot = SessionMarkdownPanelSnapshot(filePath: markdownPanel.filePath)
             fileExplorerSnapshot = nil
         case .fileExplorer:
+            guard let fePanel = panel as? FileExplorerPanel else { return nil }
             terminalSnapshot = nil
             browserSnapshot = nil
             markdownSnapshot = nil
-            if let fePanel = panel as? FileExplorerPanel {
-                fileExplorerSnapshot = SessionFileExplorerPanelSnapshot(
-                    rootPath: fePanel.rootPath,
-                    expandedPaths: collectExpandedPaths(fePanel.rootNodes),
-                    selectedPath: nil,
-                    showHiddenFiles: fePanel.showHiddenFiles,
-                    showIgnoredFiles: fePanel.showIgnoredFiles,
-                    openAction: fePanel.openAction.rawValue
-                )
-            } else {
-                fileExplorerSnapshot = nil
-            }
+            fileExplorerSnapshot = SessionFileExplorerPanelSnapshot(
+                rootPath: fePanel.rootPath,
+                expandedPaths: collectExpandedPaths(fePanel.rootNodes),
+                selectedPath: nil,
+                showHiddenFiles: fePanel.showHiddenFiles,
+                showIgnoredFiles: fePanel.showIgnoredFiles,
+                openAction: fePanel.openAction.rawValue
+            )
         }
 
         return SessionPanelSnapshot(
