@@ -431,7 +431,7 @@ enum DragOverlayRoutingPolicy {
         return hasBonsplitTabTransfer(pasteboardTypes) || hasSidebarTabReorder(pasteboardTypes)
     }
 
-    private static func isDragMouseEvent(_ eventType: NSEvent.EventType?) -> Bool {
+    static func isDragMouseEvent(_ eventType: NSEvent.EventType?) -> Bool {
         eventType == .leftMouseDragged
             || eventType == .rightMouseDragged
             || eventType == .otherMouseDragged
@@ -523,8 +523,12 @@ final class FileDropOverlayView: NSView {
     // file-drop, bonsplit tab drags, and sidebar tab reorder drags cannot conflict.
 
     override func hitTest(_ point: NSPoint) -> NSView? {
-        let pb = NSPasteboard(name: .drag)
+        // Fast reject: only drag-mouse events can be file drops.
+        // Avoids NSPasteboard access on every keystroke / cursor update.
         let eventType = NSApp.currentEvent?.type
+        guard DragOverlayRoutingPolicy.isDragMouseEvent(eventType) else { return nil }
+
+        let pb = NSPasteboard(name: .drag)
         let shouldCapture = DragOverlayRoutingPolicy.shouldCaptureFileDropOverlay(
             pasteboardTypes: pb.types,
             eventType: eventType

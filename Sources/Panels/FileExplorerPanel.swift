@@ -119,13 +119,20 @@ final class FileExplorerPanel: Panel, ObservableObject {
         directorySubscription?.cancel()
         directorySubscription = workspace.$currentDirectory
             .removeDuplicates()
-            .debounce(for: .milliseconds(300), scheduler: DispatchQueue.main)
+            .debounce(for: .milliseconds(500), scheduler: DispatchQueue.main)
             .sink { [weak self] newDirectory in
                 guard let self, self.followsActiveTerminal, !self.isClosed else { return }
                 guard !newDirectory.isEmpty else { return }
-                let newRoot = Self.gitRepoRoot(for: newDirectory) ?? newDirectory
-                guard newRoot != self.rootPath else { return }
-                self.updateRoot(newRoot)
+                let currentRoot = self.rootPath
+                DispatchQueue.global(qos: .utility).async { [weak self] in
+                    let newRoot = Self.gitRepoRoot(for: newDirectory) ?? newDirectory
+                    guard newRoot != currentRoot else { return }
+                    DispatchQueue.main.async { [weak self] in
+                        guard let self, !self.isClosed else { return }
+                        guard newRoot != self.rootPath else { return }
+                        self.updateRoot(newRoot)
+                    }
+                }
             }
     }
 
@@ -221,7 +228,7 @@ final class FileExplorerPanel: Panel, ObservableObject {
 
     // MARK: - Git status
 
-    /// Asynchronously refreshes the git status, debounced by 500 ms.
+    /// Asynchronously refreshes the git status, debounced by 1 second.
     func refreshGitStatus() {
         gitStatusDebounceWork?.cancel()
         let work = DispatchWorkItem { [weak self] in
@@ -231,7 +238,7 @@ final class FileExplorerPanel: Panel, ObservableObject {
             }
         }
         gitStatusDebounceWork = work
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5, execute: work)
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.0, execute: work)
     }
 
     private func performGitStatusRefresh() async {
@@ -333,7 +340,7 @@ final class FileExplorerPanel: Panel, ObservableObject {
             self.refreshGitStatus()
         }
         fsEventDebounceWork = work
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5, execute: work)
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.0, execute: work)
     }
 
     // MARK: - Deinit
