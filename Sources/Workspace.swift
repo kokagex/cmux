@@ -7996,6 +7996,7 @@ final class Workspace: Identifiable, ObservableObject {
         }
 
         installFileExplorerPanelSubscription(fileExplorerPanel)
+        fileExplorerPanel.bindToWorkspaceDirectory(self)
         return fileExplorerPanel
     }
 
@@ -8042,6 +8043,7 @@ final class Workspace: Identifiable, ObservableObject {
         }
 
         installFileExplorerPanelSubscription(fileExplorerPanel)
+        fileExplorerPanel.bindToWorkspaceDirectory(self)
         return fileExplorerPanel
     }
 

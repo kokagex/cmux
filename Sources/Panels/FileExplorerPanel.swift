@@ -1,4 +1,5 @@
 import Foundation
+import Combine
 import CoreServices
 
 // MARK: - FileExplorerOpenAction
@@ -65,10 +66,14 @@ final class FileExplorerPanel: Panel, ObservableObject {
     /// Text used to filter the file list.
     @Published var filterText: String = ""
 
+    /// When true, rootPath follows the active terminal's CWD (resolved to git repo root).
+    @Published var followsActiveTerminal: Bool = true
+
     // MARK: - Internal state
 
     private var isClosed: Bool = false
     private var gitStatusProvider: GitStatusProvider?
+    private var directorySubscription: AnyCancellable?
 
     // FSEventStream — nonisolated(unsafe) because the stream may be stopped from deinit
     // which is not guaranteed to run on the main actor, but FSEventStreamStop/Invalidate/Release
@@ -103,6 +108,32 @@ final class FileExplorerPanel: Panel, ObservableObject {
         self.gitStatusProvider = provider
 
         reloadTree()
+        startFSEventStream()
+        refreshIgnoredPaths()
+        refreshGitStatus()
+    }
+
+    /// Bind the file explorer to a workspace's currentDirectory so it follows
+    /// the active terminal's CWD (resolved to git repo root).
+    func bindToWorkspaceDirectory(_ workspace: Workspace) {
+        directorySubscription?.cancel()
+        directorySubscription = workspace.$currentDirectory
+            .removeDuplicates()
+            .debounce(for: .milliseconds(300), scheduler: DispatchQueue.main)
+            .sink { [weak self] newDirectory in
+                guard let self, self.followsActiveTerminal, !self.isClosed else { return }
+                guard !newDirectory.isEmpty else { return }
+                let newRoot = Self.gitRepoRoot(for: newDirectory) ?? newDirectory
+                guard newRoot != self.rootPath else { return }
+                self.updateRoot(newRoot)
+            }
+    }
+
+    /// Update root path and restart FS watching + git status.
+    private func updateRoot(_ newRoot: String) {
+        stopFSEventStream()
+        rootPath = newRoot
+        gitStatusProvider = GitStatusProvider(rootPath: newRoot)
         startFSEventStream()
         refreshIgnoredPaths()
         refreshGitStatus()
@@ -144,6 +175,8 @@ final class FileExplorerPanel: Panel, ObservableObject {
 
     func close() {
         isClosed = true
+        directorySubscription?.cancel()
+        directorySubscription = nil
         stopFSEventStream()
         fsEventDebounceWork?.cancel()
         gitStatusDebounceWork?.cancel()
@@ -242,7 +275,7 @@ final class FileExplorerPanel: Panel, ObservableObject {
         guard eventStream == nil else { return }
 
         let pathsToWatch = [rootPath] as CFArray
-        let latency: CFTimeInterval = 0.1 // 100 ms
+        let latency: CFTimeInterval = 0.5 // 500 ms coalesce window
 
         // Use Unmanaged to bridge self as a raw pointer into the C callback.
         let selfPtr = Unmanaged.passRetained(self).toOpaque()
@@ -274,9 +307,7 @@ final class FileExplorerPanel: Panel, ObservableObject {
             pathsToWatch,
             FSEventStreamEventId(kFSEventStreamEventIdSinceNow),
             latency,
-            FSEventStreamCreateFlags(kFSEventStreamCreateFlagUseCFTypes |
-                                     kFSEventStreamCreateFlagFileEvents |
-                                     kFSEventStreamCreateFlagNoDefer)
+            FSEventStreamCreateFlags(kFSEventStreamCreateFlagUseCFTypes)
         )
 
         guard let stream else { return }
@@ -293,7 +324,7 @@ final class FileExplorerPanel: Panel, ObservableObject {
         eventStream = nil
     }
 
-    /// Debounced handler for FSEvent callbacks — waits 100 ms before acting.
+    /// Debounced handler for FSEvent callbacks.
     func handleFSEvents() {
         fsEventDebounceWork?.cancel()
         let work = DispatchWorkItem { [weak self] in
@@ -302,7 +333,7 @@ final class FileExplorerPanel: Panel, ObservableObject {
             self.refreshGitStatus()
         }
         fsEventDebounceWork = work
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.1, execute: work)
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5, execute: work)
     }
 
     // MARK: - Deinit
