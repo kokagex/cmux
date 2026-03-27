@@ -317,7 +317,50 @@ struct WorkspaceContentView: View {
                         guard workspace.panels[panel.id] != nil else { return }
                         workspace.focusPanel(panel.id)
                     },
-                    onTriggerFlash: { workspace.triggerDebugFlash(panelId: panel.id) }
+                    onTriggerFlash: { workspace.triggerDebugFlash(panelId: panel.id) },
+                    onOpenFileInEditor: { filePath, isPreview in
+                        // Find a non-file-explorer pane to open the editor in.
+                        // If none exists, split the current pane horizontally.
+                        let explorerPaneId = paneId
+                        let adjacentPaneId: Bonsplit.PaneID? = {
+                            // Try right first, then left, then down, then up
+                            for direction: Bonsplit.NavigationDirection in [.right, .left, .down, .up] {
+                                if let candidate = workspace.bonsplitController.adjacentPane(
+                                    to: explorerPaneId, direction: direction
+                                ) {
+                                    // Ensure the adjacent pane isn't another file explorer
+                                    let tabs = workspace.bonsplitController.tabs(inPane: candidate)
+                                    let isExplorer = tabs.allSatisfy { $0.kind == "fileExplorer" }
+                                    if !isExplorer || tabs.isEmpty {
+                                        return candidate
+                                    }
+                                }
+                            }
+                            return nil
+                        }()
+
+                        if let targetPane = adjacentPaneId {
+                            workspace.newEditorSurface(
+                                inPane: targetPane,
+                                filePath: filePath,
+                                isPreview: isPreview,
+                                focus: !isPreview
+                            )
+                        } else {
+                            // No adjacent pane — split horizontally and open in the new right pane
+                            if let newPane = workspace.bonsplitController.splitPane(
+                                explorerPaneId,
+                                orientation: .horizontal
+                            ) {
+                                workspace.newEditorSurface(
+                                    inPane: newPane,
+                                    filePath: filePath,
+                                    isPreview: isPreview,
+                                    focus: !isPreview
+                                )
+                            }
+                        }
+                    }
                 )
                 .onTapGesture {
                     workspace.bonsplitController.focusPane(paneId)

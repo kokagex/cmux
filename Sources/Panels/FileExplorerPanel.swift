@@ -48,7 +48,7 @@ final class FileExplorerPanel: Panel, ObservableObject {
     @Published private(set) var ignoredPaths: Set<String> = []
 
     /// Whether to show files whose names start with `.`.
-    @Published var showHiddenFiles: Bool = false {
+    @Published var showHiddenFiles: Bool = true {
         didSet { reloadTree() }
     }
 

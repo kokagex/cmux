@@ -8,6 +8,7 @@ struct FileExplorerPanelView: View {
     let isVisibleInUI: Bool
     let portalPriority: Int
     let onRequestPanelFocus: () -> Void
+    var onOpenFileInEditor: ((String, Bool) -> Void)?
 
     @State private var focusFlashOpacity: Double = 0.0
     @State private var focusFlashAnimationGeneration: Int = 0
@@ -17,7 +18,7 @@ struct FileExplorerPanelView: View {
         VStack(spacing: 0) {
             toolbar
             Divider()
-            FileExplorerOutlineView(panel: panel, onFileOpen: { openFile($0) })
+            FileExplorerOutlineView(panel: panel, onFileOpen: { openFile($0) }, onFilePreview: { previewFile($0) })
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(backgroundColor)
@@ -148,11 +149,20 @@ struct FileExplorerPanelView: View {
     }
 
     private func openFile(_ node: FileNode) {
-        switch panel.openAction {
-        case .system, .builtin, .editor:
-            // .builtin and .editor are placeholders for future integration; fall back to system open.
+        let path = node.url.path
+        if EditorPanel.isBinaryFile(at: path) {
             NSWorkspace.shared.open(node.url)
+        } else {
+            onOpenFileInEditor?(path, false)
         }
+    }
+
+    private func previewFile(_ node: FileNode) {
+        let path = node.url.path
+        if EditorPanel.isBinaryFile(at: path) {
+            return
+        }
+        onOpenFileInEditor?(path, true)
     }
 
     // MARK: - Focus Flash

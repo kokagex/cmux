@@ -7,6 +7,7 @@ import AppKit
 struct FileExplorerOutlineView: NSViewRepresentable {
     @ObservedObject var panel: FileExplorerPanel
     let onFileOpen: (FileNode) -> Void
+    let onFilePreview: ((FileNode) -> Void)?
 
     // MARK: - Coordinator
 
@@ -15,10 +16,11 @@ struct FileExplorerOutlineView: NSViewRepresentable {
         let dataSource: FileExplorerDataSource
         var lastRenderedGeneration: Int = -1
 
-        init(panel: FileExplorerPanel, onFileOpen: @escaping (FileNode) -> Void) {
+        init(panel: FileExplorerPanel, onFileOpen: @escaping (FileNode) -> Void, onFilePreview: ((FileNode) -> Void)?) {
             self.dataSource = FileExplorerDataSource()
             self.dataSource.panel = panel
             self.dataSource.onFileDoubleClick = onFileOpen
+            self.dataSource.onFileSingleClick = onFilePreview
             self.dataSource.onNodeExpand = { [weak panel] node in
                 panel?.refreshExpandedNode(node)
             }
@@ -26,7 +28,7 @@ struct FileExplorerOutlineView: NSViewRepresentable {
     }
 
     func makeCoordinator() -> Coordinator {
-        Coordinator(panel: panel, onFileOpen: onFileOpen)
+        Coordinator(panel: panel, onFileOpen: onFileOpen, onFilePreview: onFilePreview)
     }
 
     // MARK: - NSViewRepresentable
@@ -46,11 +48,13 @@ struct FileExplorerOutlineView: NSViewRepresentable {
         outlineView.style = .sourceList
         outlineView.selectionHighlightStyle = .sourceList
 
-        // Single column
+        // Single column — auto-resize to fill width
         let column = NSTableColumn(identifier: NSUserInterfaceItemIdentifier("FileColumn"))
         column.isEditable = false
+        column.resizingMask = .autoresizingMask
         outlineView.addTableColumn(column)
         outlineView.outlineTableColumn = column
+        outlineView.columnAutoresizingStyle = .firstColumnOnlyAutoresizingStyle
 
         let ds = context.coordinator.dataSource
 
@@ -83,6 +87,14 @@ struct FileExplorerOutlineView: NSViewRepresentable {
         coordinator.dataSource.panel = panel
 
         guard let outlineView = scrollView.documentView as? NSOutlineView else { return }
+
+        // Keep column width in sync with scroll view
+        if let column = outlineView.tableColumns.first {
+            let availableWidth = scrollView.contentSize.width
+            if abs(column.width - availableWidth) > 1 {
+                column.width = availableWidth
+            }
+        }
 
         // Only reload when the tree data actually changed
         let currentGen = panel.treeGeneration

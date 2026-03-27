@@ -9,7 +9,11 @@ final class FileExplorerDataSource: NSObject, NSOutlineViewDataSource, NSOutline
     weak var panel: FileExplorerPanel?
     weak var outlineView: NSOutlineView?
     var onFileDoubleClick: ((FileNode) -> Void)?
+    var onFileSingleClick: ((FileNode) -> Void)?
     var onNodeExpand: ((FileNode) -> Void)?
+
+    /// Debounce work item for single-click preview to avoid rapid editor creation.
+    private var previewDebounceWork: DispatchWorkItem?
 
     // MARK: - NSOutlineViewDataSource
 
@@ -132,6 +136,21 @@ final class FileExplorerDataSource: NSObject, NSOutlineViewDataSource, NSOutline
     func outlineViewItemDidCollapse(_ notification: Notification) {
         guard let node = notification.userInfo?["NSObject"] as? FileNode else { return }
         node.isExpanded = false
+    }
+
+    func outlineViewSelectionDidChange(_ notification: Notification) {
+        guard let outlineView = notification.object as? NSOutlineView else { return }
+        let row = outlineView.selectedRow
+        guard row >= 0, let node = outlineView.item(atRow: row) as? FileNode else { return }
+        if !node.isDirectory {
+            // Debounce preview to avoid rapid editor creation when navigating
+            previewDebounceWork?.cancel()
+            let work = DispatchWorkItem { [weak self] in
+                self?.onFileSingleClick?(node)
+            }
+            previewDebounceWork = work
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.35, execute: work)
+        }
     }
 
     // MARK: - Actions
