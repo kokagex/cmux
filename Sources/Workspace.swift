@@ -475,11 +475,15 @@ extension Workspace {
             )
             editorSnapshot = nil
         case .editor:
+            guard let editorPanel = panel as? EditorPanel else { return nil }
             terminalSnapshot = nil
             browserSnapshot = nil
             markdownSnapshot = nil
             fileExplorerSnapshot = nil
-            editorSnapshot = nil
+            editorSnapshot = SessionEditorPanelSnapshot(
+                filePath: editorPanel.filePath,
+                isPreview: editorPanel.isPreview
+            )
         }
 
         return SessionPanelSnapshot(
@@ -702,7 +706,18 @@ extension Workspace {
             applySessionPanelMetadata(snapshot, toPanelId: fileExplorerPanel.id)
             return fileExplorerPanel.id
         case .editor:
-            return nil
+            guard let filePath = snapshot.editor?.filePath,
+                  FileManager.default.fileExists(atPath: filePath),
+                  let editorPanel = newEditorSurface(
+                    inPane: paneId,
+                    filePath: filePath,
+                    isPreview: snapshot.editor?.isPreview ?? false,
+                    focus: false
+                  ) else {
+                return nil
+            }
+            applySessionPanelMetadata(snapshot, toPanelId: editorPanel.id)
+            return editorPanel.id
         }
     }
 
