@@ -61,9 +61,6 @@ struct FileExplorerOutlineView: NSViewRepresentable {
         // Mount in scroll view
         scrollView.documentView = outlineView
 
-        // Store reference in coordinator so it can reload/expand
-        context.coordinator.outlineView = outlineView
-
         return scrollView
     }
 

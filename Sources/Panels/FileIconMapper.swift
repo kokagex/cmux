@@ -2,6 +2,8 @@
 // Maps file extensions and filenames to SF Symbol icon names.
 // All symbols are available on macOS 13+.
 
+import Foundation
+
 enum FileIconMapper {
     static let folderIcon = "folder.fill"
     static let fileIcon = "doc.fill"
@@ -111,7 +113,7 @@ enum FileIconMapper {
             return symbol
         }
 
-        let ext = (name as NSString).pathExtension.lowercased()
+        let ext = URL(fileURLWithPath: name).pathExtension.lowercased()
         if !ext.isEmpty, let symbol = extensionMap[ext] {
             return symbol
         }

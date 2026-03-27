@@ -38,7 +38,7 @@ actor GitStatusProvider {
     func fetchIgnoredPaths(_ paths: [String]) async -> Set<String> {
         guard !paths.isEmpty else { return [] }
 
-        return await withCheckedContinuation { continuation in
+        return await withCheckedContinuation { (continuation: CheckedContinuation<Set<String>, Never>) in
             queue.async { [rootPath] in
                 // Convert absolute paths to relative for git check-ignore
                 let relativePaths = paths.map { path -> String in
@@ -64,15 +64,11 @@ actor GitStatusProvider {
                     return
                 }
 
-                // Parse NUL-separated relative paths and convert to absolute
-                let ignored: Set<String> = Set(
-                    output
-                        .split(separator: "\0", omittingEmptySubsequences: true)
-                        .map { relativePath -> String in
-                            let rel = String(relativePath)
-                            return rootPath + "/" + rel
-                        }
-                )
+                // output is already NUL-split by runGit, convert to absolute paths
+                let ignoredArray: [String] = output.map { relativePath in
+                    rootPath + "/" + String(relativePath)
+                }
+                let ignored = Set(ignoredArray)
                 continuation.resume(returning: ignored)
             }
         }
