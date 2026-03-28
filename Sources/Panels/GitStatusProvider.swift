@@ -18,7 +18,7 @@ actor GitStatusProvider {
         return await withCheckedContinuation { continuation in
             queue.async { [rootPath] in
                 let result = Self.runGit(
-                    args: ["status", "--porcelain=v1", "-z"],
+                    args: ["status", "--porcelain=v1", "-z", "--ignored"],
                     rootPath: rootPath
                 )
                 guard let output = result else {
@@ -151,7 +151,9 @@ actor GitStatusProvider {
 
             guard !relativePath.isEmpty else { continue }
 
-            let absolutePath = rootPath + "/" + relativePath
+            // Strip trailing slash from ignored directories
+            let cleanedPath = relativePath.hasSuffix("/") ? String(relativePath.dropLast()) : relativePath
+            let absolutePath = rootPath + "/" + cleanedPath
             let status = gitFileStatus(x: x, y: y)
             result[absolutePath] = status
 
@@ -169,6 +171,11 @@ actor GitStatusProvider {
 
     /// Maps XY status characters from `git status --porcelain=v1` to `GitFileStatus`.
     private static func gitFileStatus(x: Character, y: Character) -> GitFileStatus {
+        // Ignored
+        if x == "!" && y == "!" {
+            return .ignored
+        }
+
         // Conflict markers
         if x == "U" || y == "U" {
             return .conflicted

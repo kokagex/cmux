@@ -217,12 +217,78 @@ final class FileExplorerPanel: Panel, ObservableObject {
         applyGitStatuses(gitStatuses, to: node.children ?? [])
     }
 
-    /// Applies a git status dictionary to a flat array of nodes (non-recursive, top-level only).
+    /// Applies a git status dictionary to nodes, recursing into expanded children.
+    /// Directories inherit the most significant status from their descendants.
     private func applyGitStatuses(_ statuses: [String: GitFileStatus], to nodes: [FileNode]) {
+        // Precompute ignored directory prefixes for ancestor checks
+        let ignoredPrefixes = statuses.compactMap { (path, status) -> String? in
+            guard status == .ignored else { return nil }
+            return path + "/"
+        }
         for node in nodes {
-            if let status = statuses[node.url.path] {
-                node.gitStatus = status
+            applyGitStatusRecursive(node, statuses: statuses, ignoredPrefixes: ignoredPrefixes)
+        }
+    }
+
+    private func applyGitStatusRecursive(
+        _ node: FileNode,
+        statuses: [String: GitFileStatus],
+        ignoredPrefixes: [String]
+    ) {
+        let path = node.url.path
+
+        if node.isDirectory {
+            // Check if this directory itself is ignored
+            if statuses[path] == .ignored {
+                node.gitStatus = .ignored
+                // Mark all loaded children as ignored too
+                if let children = node.children {
+                    for child in children { child.gitStatus = .ignored }
+                }
+                return
             }
+
+            if let children = node.children {
+                for child in children {
+                    applyGitStatusRecursive(child, statuses: statuses, ignoredPrefixes: ignoredPrefixes)
+                }
+                // Directory status = most significant child status
+                node.gitStatus = children.reduce(GitFileStatus.unmodified) { result, child in
+                    Self.statusPriority(child.gitStatus) > Self.statusPriority(result) ? child.gitStatus : result
+                }
+            } else {
+                // Collapsed directory: scan statuses dict for any descendant
+                let prefix = path + "/"
+                var highest = GitFileStatus.unmodified
+                for (filePath, status) in statuses {
+                    guard filePath.hasPrefix(prefix) else { continue }
+                    if Self.statusPriority(status) > Self.statusPriority(highest) {
+                        highest = status
+                    }
+                }
+                node.gitStatus = highest
+            }
+        } else {
+            if let status = statuses[path] {
+                node.gitStatus = status
+            } else {
+                // Check if under an ignored directory
+                let isIgnored = ignoredPrefixes.contains { path.hasPrefix($0) }
+                node.gitStatus = isIgnored ? .ignored : .unmodified
+            }
+        }
+    }
+
+    /// Priority order for git statuses — higher means more significant.
+    private static func statusPriority(_ status: GitFileStatus) -> Int {
+        switch status {
+        case .unmodified: return 0
+        case .ignored:    return 1
+        case .untracked:  return 2
+        case .added:      return 3
+        case .deleted:    return 4
+        case .modified:   return 5
+        case .conflicted: return 6
         }
     }
 
@@ -247,6 +313,7 @@ final class FileExplorerPanel: Panel, ObservableObject {
         guard !isClosed else { return }
         gitStatuses = statuses
         applyGitStatuses(statuses, to: rootNodes)
+        treeGeneration += 1
     }
 
     /// Asynchronously refreshes the set of git-ignored paths.

@@ -299,20 +299,22 @@ final class FileExplorerCellView: NSView {
         let image = NSImage(systemSymbolName: symbolName, accessibilityDescription: nil)
         iconView.image = image
 
+        let color = textColor(for: node.gitStatus)
         if node.isDirectory {
-            iconView.contentTintColor = .systemOrange
+            // Tint directory icon with git status color, fallback to orange for unmodified
+            iconView.contentTintColor = node.gitStatus == .unmodified ? .systemOrange : color
         } else {
-            iconView.contentTintColor = .labelColor
+            iconView.contentTintColor = node.gitStatus == .unmodified ? .labelColor : color
         }
 
         // Name label color based on git status
         nameLabel.stringValue = node.name
-        nameLabel.textColor = textColor(for: node.gitStatus)
+        nameLabel.textColor = color
 
         // Status badge
         let badge = statusBadge(for: node.gitStatus)
         statusLabel.stringValue = badge
-        statusLabel.textColor = textColor(for: node.gitStatus)
+        statusLabel.textColor = color
         statusLabel.isHidden = badge.isEmpty
     }
 
@@ -322,8 +324,9 @@ final class FileExplorerCellView: NSView {
         case .modified:    return .systemYellow
         case .added:       return .systemGreen
         case .deleted:     return .systemRed
-        case .untracked:   return .secondaryLabelColor
+        case .untracked:   return .systemTeal
         case .conflicted:  return .systemOrange
+        case .ignored:     return .tertiaryLabelColor
         }
     }
 
@@ -333,8 +336,9 @@ final class FileExplorerCellView: NSView {
         case .modified:    return "M"
         case .added:       return "A"
         case .deleted:     return "D"
-        case .untracked:   return "?"
+        case .untracked:   return "U"
         case .conflicted:  return "C"
+        case .ignored:     return ""
         }
     }
 }

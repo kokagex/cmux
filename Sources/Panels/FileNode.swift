@@ -9,6 +9,7 @@ enum GitFileStatus: Sendable {
     case deleted
     case untracked
     case conflicted
+    case ignored
 }
 
 // MARK: - FileNode
