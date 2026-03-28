@@ -10,7 +10,9 @@ Run the setup script to initialize submodules and build GhosttyKit:
 
 ## Local dev
 
-After making code changes, always run the reload script with a tag to build the Debug app:
+**Debugビルドはユーザーから指示された場合のみ実行すること。** コード変更後に自動でビルドしない。
+
+Debugビルドが必要な場合は、reload script with a tag を使う:
 
 ```bash
 ./scripts/reload.sh --tag fix-zsh-autosuggestions
@@ -26,29 +28,25 @@ By default, `reload.sh` builds but does **not** launch the app. The script print
 
 1. Grab the path from the `App path:` line in `reload.sh` output.
 2. Prepend `file://` and URL-encode spaces as `%20`. Do not hardcode any part of the path.
-3. Format it as a markdown link using the template for your agent type.
+3. Output the `file://` URL as a markdown link. No decoration, no surrounding text — just the link.
 
 Example. If `reload.sh` output contains:
 ```
 App path:
-  /Users/someone/Library/Developer/Xcode/DerivedData/cmux-my-tag/Build/Products/Debug/cmux DEV my-tag.app
+  /tmp/cmux-my-tag/Build/Products/Debug/cmux DEV my-tag.app
 ```
 
 **Claude Code** outputs:
 ```markdown
-=======================================================
-[cmux DEV my-tag.app](file:///Users/someone/Library/Developer/Xcode/DerivedData/cmux-my-tag/Build/Products/Debug/cmux%20DEV%20my-tag.app)
-=======================================================
+[cmux DEV my-tag.app](file:///tmp/cmux-my-tag/Build/Products/Debug/cmux%20DEV%20my-tag.app)
 ```
 
 **Codex** outputs:
 ```
-=======================================================
-[my-tag: file:///Users/someone/Library/Developer/Xcode/DerivedData/cmux-my-tag/Build/Products/Debug/cmux%20DEV%20my-tag.app](file:///Users/someone/Library/Developer/Xcode/DerivedData/cmux-my-tag/Build/Products/Debug/cmux%20DEV%20my-tag.app)
-=======================================================
+[my-tag: file:///tmp/cmux-my-tag/Build/Products/Debug/cmux%20DEV%20my-tag.app](file:///tmp/cmux-my-tag/Build/Products/Debug/cmux%20DEV%20my-tag.app)
 ```
 
-Never use `/tmp/cmux-<tag>/...` app links in chat output.
+**ビルド後は必ずアプリの `file://` URLリンクだけを出力すること。** `reload.sh`、`reloadp.sh`、`reloads.sh`、`xcodebuild` いずれのビルド方法でも、ビルド成功後にリンクの出力を省略してはならない。余計なテキストや装飾は不要。
 
 After making code changes, always use `reload.sh --tag` to build. **Never run bare `xcodebuild` or `open` an untagged `cmux DEV.app`.** Untagged builds share the default debug socket and bundle ID with other agents, causing conflicts and stealing focus.
 

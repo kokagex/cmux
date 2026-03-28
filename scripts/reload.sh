@@ -138,7 +138,7 @@ sanitize_path() {
 
 tagged_derived_data_path() {
   local slug="$1"
-  echo "$HOME/Library/Developer/Xcode/DerivedData/cmux-${slug}"
+  echo "${PWD}/DerivedData/cmux-${slug}"
 }
 
 print_tag_cleanup_reminder() {
@@ -151,6 +151,8 @@ print_tag_cleanup_reminder() {
   while IFS= read -r -d '' path; do
     if [[ "$path" == /tmp/cmux-* ]]; then
       tag="${path#/tmp/cmux-}"
+    elif [[ "$path" == "${PWD}/DerivedData/cmux-"* ]]; then
+      tag="${path#${PWD}/DerivedData/cmux-}"
     elif [[ "$path" == "$HOME/Library/Developer/Xcode/DerivedData/cmux-"* ]]; then
       tag="${path#$HOME/Library/Developer/Xcode/DerivedData/cmux-}"
     else
@@ -170,6 +172,7 @@ print_tag_cleanup_reminder() {
     stale_tags+=("$tag")
   done < <(
     find /tmp -maxdepth 1 -name 'cmux-*' -print0 2>/dev/null
+    find "${PWD}/DerivedData" -maxdepth 1 -type d -name 'cmux-*' -print0 2>/dev/null
     find "$HOME/Library/Developer/Xcode/DerivedData" -maxdepth 1 -type d -name 'cmux-*' -print0 2>/dev/null
   )
 

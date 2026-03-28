@@ -2343,6 +2343,10 @@ class TerminalController {
         case "markdown.open":
             return v2Result(id: id, self.v2MarkdownOpen(params: params))
 
+        // Editor
+        case "editor.open":
+            return v2Result(id: id, self.v2EditorOpen(params: params))
+
         case "surface.read_text":
             return v2Result(id: id, self.v2SurfaceReadText(params: params))
 
@@ -2487,6 +2491,7 @@ class TerminalController {
             "app.focus_override.set",
             "app.simulate_active",
             "markdown.open",
+            "editor.open",
             "browser.open_split",
             "browser.navigate",
             "browser.back",
@@ -7220,6 +7225,81 @@ class TerminalController {
                 "target_pane_id": v2OrNull(targetPaneUUID?.uuidString),
                 "target_pane_ref": v2Ref(kind: .pane, uuid: targetPaneUUID),
                 "path": filePath
+            ])
+        }
+        return result
+    }
+
+    // MARK: - Editor
+
+    private func v2EditorOpen(params: [String: Any]) -> V2CallResult {
+        guard let tabManager = v2ResolveTabManager(params: params) else {
+            return .err(code: "unavailable", message: "TabManager not available", data: nil)
+        }
+        guard let rawPath = v2String(params, "path") else {
+            return .err(code: "invalid_params", message: "Missing 'path' parameter", data: nil)
+        }
+
+        let expandedPath = NSString(string: rawPath).expandingTildeInPath
+        let filePath = NSString(string: expandedPath).standardizingPath
+
+        guard filePath.hasPrefix("/") else {
+            return .err(code: "invalid_params", message: "Path must be absolute: \(filePath)", data: ["path": filePath])
+        }
+
+        var isDir: ObjCBool = false
+        guard FileManager.default.fileExists(atPath: filePath, isDirectory: &isDir) else {
+            return .err(code: "not_found", message: "File not found: \(filePath)", data: ["path": filePath])
+        }
+        guard !isDir.boolValue else {
+            return .err(code: "invalid_params", message: "Path is a directory: \(filePath)", data: ["path": filePath])
+        }
+        guard FileManager.default.isReadableFile(atPath: filePath) else {
+            return .err(code: "permission_denied", message: "File not readable: \(filePath)", data: ["path": filePath])
+        }
+
+        if EditorPanel.isBinaryFile(at: filePath) {
+            return .err(code: "invalid_params", message: "File appears to be binary: \(filePath)", data: ["path": filePath])
+        }
+
+        let isPreview = v2Bool(params, "preview") ?? false
+        let shouldFocus = v2Bool(params, "focus") ?? true
+
+        var result: V2CallResult = .err(code: "internal_error", message: "Failed to create editor panel", data: nil)
+        v2MainSync {
+            guard let ws = v2ResolveWorkspace(params: params, tabManager: tabManager) else {
+                result = .err(code: "not_found", message: "Workspace not found", data: nil)
+                return
+            }
+            if shouldFocus {
+                v2MaybeFocusWindow(for: tabManager)
+                v2MaybeSelectWorkspace(tabManager, workspace: ws)
+            }
+
+            guard let focusedPaneId = ws.bonsplitController.focusedPaneId else {
+                result = .err(code: "not_found", message: "No focused pane", data: nil)
+                return
+            }
+
+            let createdPanel = ws.newEditorSurface(
+                inPane: focusedPaneId,
+                filePath: filePath,
+                isPreview: isPreview,
+                focus: shouldFocus
+            )
+
+            guard let editorPanelId = createdPanel?.id else {
+                result = .err(code: "internal_error", message: "Failed to create editor panel", data: nil)
+                return
+            }
+
+            let windowId = v2ResolveWindowId(tabManager: tabManager)
+            result = .ok([
+                "window_id": v2OrNull(windowId?.uuidString),
+                "workspace_id": ws.id.uuidString,
+                "surface_id": editorPanelId.uuidString,
+                "path": filePath,
+                "preview": isPreview
             ])
         }
         return result

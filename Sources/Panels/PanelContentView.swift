@@ -16,6 +16,7 @@ struct PanelContentView: View {
     let onFocus: () -> Void
     let onRequestPanelFocus: () -> Void
     let onTriggerFlash: () -> Void
+    var onOpenFileInEditor: ((String, Bool) -> Void)?
 
     var body: some View {
         switch panel.panelType {
@@ -49,6 +50,27 @@ struct PanelContentView: View {
             if let markdownPanel = panel as? MarkdownPanel {
                 MarkdownPanelView(
                     panel: markdownPanel,
+                    isFocused: isFocused,
+                    isVisibleInUI: isVisibleInUI,
+                    portalPriority: portalPriority,
+                    onRequestPanelFocus: onRequestPanelFocus
+                )
+            }
+        case .fileExplorer:
+            if let fileExplorerPanel = panel as? FileExplorerPanel {
+                FileExplorerPanelView(
+                    panel: fileExplorerPanel,
+                    isFocused: isFocused,
+                    isVisibleInUI: isVisibleInUI,
+                    portalPriority: portalPriority,
+                    onRequestPanelFocus: onRequestPanelFocus,
+                    onOpenFileInEditor: onOpenFileInEditor
+                )
+            }
+        case .editor:
+            if let editorPanel = panel as? EditorPanel {
+                EditorPanelView(
+                    panel: editorPanel,
                     isFocused: isFocused,
                     isVisibleInUI: isVisibleInUI,
                     portalPriority: portalPriority,

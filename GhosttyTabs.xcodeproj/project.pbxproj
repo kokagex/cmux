@@ -33,7 +33,19 @@
 		A5001404 /* BrowserPanelView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A5001414 /* BrowserPanelView.swift */; };
 		A5007420 /* BrowserPopupWindowController.swift in Sources */ = {isa = PBXBuildFile; fileRef = A5007421 /* BrowserPopupWindowController.swift */; };
 		A5001420 /* MarkdownPanel.swift in Sources */ = {isa = PBXBuildFile; fileRef = A5001418 /* MarkdownPanel.swift */; };
+		FE100010 /* FileWatcherHelper.swift in Sources */ = {isa = PBXBuildFile; fileRef = FE200010 /* FileWatcherHelper.swift */; };
+		FE100020 /* EditorPanel.swift in Sources */ = {isa = PBXBuildFile; fileRef = FE200020 /* EditorPanel.swift */; };
+		FE100030 /* SyntaxHighlighter.swift in Sources */ = {isa = PBXBuildFile; fileRef = FE200030 /* SyntaxHighlighter.swift */; };
+		FE100040 /* EditorTextView.swift in Sources */ = {isa = PBXBuildFile; fileRef = FE200040 /* EditorTextView.swift */; };
+		FE100050 /* EditorPanelView.swift in Sources */ = {isa = PBXBuildFile; fileRef = FE200050 /* EditorPanelView.swift */; };
 		A5001421 /* MarkdownPanelView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A5001419 /* MarkdownPanelView.swift */; };
+		FE100001 /* FileNode.swift in Sources */ = {isa = PBXBuildFile; fileRef = FE200001 /* FileNode.swift */; };
+		FE100002 /* FileIconMapper.swift in Sources */ = {isa = PBXBuildFile; fileRef = FE200002 /* FileIconMapper.swift */; };
+		FE100003 /* GitStatusProvider.swift in Sources */ = {isa = PBXBuildFile; fileRef = FE200003 /* GitStatusProvider.swift */; };
+		FE100004 /* FileExplorerPanel.swift in Sources */ = {isa = PBXBuildFile; fileRef = FE200004 /* FileExplorerPanel.swift */; };
+		FE100005 /* FileExplorerDataSource.swift in Sources */ = {isa = PBXBuildFile; fileRef = FE200005 /* FileExplorerDataSource.swift */; };
+		FE100006 /* FileExplorerOutlineView.swift in Sources */ = {isa = PBXBuildFile; fileRef = FE200006 /* FileExplorerOutlineView.swift */; };
+		FE100007 /* FileExplorerPanelView.swift in Sources */ = {isa = PBXBuildFile; fileRef = FE200007 /* FileExplorerPanelView.swift */; };
 		A5001290 /* MarkdownUI in Frameworks */ = {isa = PBXBuildFile; productRef = A5001291 /* MarkdownUI */; };
 		A5001405 /* PanelContentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A5001415 /* PanelContentView.swift */; };
 		A5001406 /* Workspace.swift in Sources */ = {isa = PBXBuildFile; fileRef = A5001416 /* Workspace.swift */; };
@@ -213,7 +225,19 @@
 		A5007421 /* BrowserPopupWindowController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Panels/BrowserPopupWindowController.swift; sourceTree = "<group>"; };
 		A5001415 /* PanelContentView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Panels/PanelContentView.swift; sourceTree = "<group>"; };
 		A5001418 /* MarkdownPanel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Panels/MarkdownPanel.swift; sourceTree = "<group>"; };
+		FE200010 /* FileWatcherHelper.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Panels/FileWatcherHelper.swift; sourceTree = "<group>"; };
+		FE200020 /* EditorPanel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Panels/EditorPanel.swift; sourceTree = "<group>"; };
+		FE200030 /* SyntaxHighlighter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Panels/SyntaxHighlighter.swift; sourceTree = "<group>"; };
+		FE200040 /* EditorTextView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Panels/EditorTextView.swift; sourceTree = "<group>"; };
+		FE200050 /* EditorPanelView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Panels/EditorPanelView.swift; sourceTree = "<group>"; };
 		A5001419 /* MarkdownPanelView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Panels/MarkdownPanelView.swift; sourceTree = "<group>"; };
+		FE200001 /* FileNode.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Panels/FileNode.swift; sourceTree = "<group>"; };
+		FE200002 /* FileIconMapper.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Panels/FileIconMapper.swift; sourceTree = "<group>"; };
+		FE200003 /* GitStatusProvider.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Panels/GitStatusProvider.swift; sourceTree = "<group>"; };
+		FE200004 /* FileExplorerPanel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Panels/FileExplorerPanel.swift; sourceTree = "<group>"; };
+		FE200005 /* FileExplorerDataSource.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Panels/FileExplorerDataSource.swift; sourceTree = "<group>"; };
+		FE200006 /* FileExplorerOutlineView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Panels/FileExplorerOutlineView.swift; sourceTree = "<group>"; };
+		FE200007 /* FileExplorerPanelView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Panels/FileExplorerPanelView.swift; sourceTree = "<group>"; };
 		A5001416 /* Workspace.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Workspace.swift; sourceTree = "<group>"; };
 		A5001417 /* WorkspaceContentView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WorkspaceContentView.swift; sourceTree = "<group>"; };
 		A5001090 /* AppDelegate.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppDelegate.swift; sourceTree = "<group>"; };
@@ -447,6 +471,18 @@
 				A5007421 /* BrowserPopupWindowController.swift */,
 				A5001418 /* MarkdownPanel.swift */,
 				A5001419 /* MarkdownPanelView.swift */,
+				FE200010 /* FileWatcherHelper.swift */,
+				FE200020 /* EditorPanel.swift */,
+				FE200030 /* SyntaxHighlighter.swift */,
+				FE200040 /* EditorTextView.swift */,
+				FE200050 /* EditorPanelView.swift */,
+				FE200001 /* FileNode.swift */,
+				FE200002 /* FileIconMapper.swift */,
+				FE200003 /* GitStatusProvider.swift */,
+				FE200004 /* FileExplorerPanel.swift */,
+				FE200005 /* FileExplorerDataSource.swift */,
+				FE200006 /* FileExplorerOutlineView.swift */,
+				FE200007 /* FileExplorerPanelView.swift */,
 				A5001510 /* CmuxWebView.swift */,
 				A5001415 /* PanelContentView.swift */,
 				A5001211 /* UpdateController.swift */,
@@ -746,6 +782,18 @@
 				A5007420 /* BrowserPopupWindowController.swift in Sources */,
 				A5001420 /* MarkdownPanel.swift in Sources */,
 				A5001421 /* MarkdownPanelView.swift in Sources */,
+				FE100010 /* FileWatcherHelper.swift in Sources */,
+				FE100020 /* EditorPanel.swift in Sources */,
+				FE100030 /* SyntaxHighlighter.swift in Sources */,
+				FE100040 /* EditorTextView.swift in Sources */,
+				FE100050 /* EditorPanelView.swift in Sources */,
+				FE100001 /* FileNode.swift in Sources */,
+				FE100002 /* FileIconMapper.swift in Sources */,
+				FE100003 /* GitStatusProvider.swift in Sources */,
+				FE100004 /* FileExplorerPanel.swift in Sources */,
+				FE100005 /* FileExplorerDataSource.swift in Sources */,
+				FE100006 /* FileExplorerOutlineView.swift in Sources */,
+				FE100007 /* FileExplorerPanelView.swift in Sources */,
 				A5001500 /* CmuxWebView.swift in Sources */,
 				A5001405 /* PanelContentView.swift in Sources */,
 				A5001201 /* UpdateController.swift in Sources */,
