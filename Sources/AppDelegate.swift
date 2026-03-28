@@ -2209,7 +2209,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
     }
     private var lastSessionAutosaveFingerprint: Int?
     private var lastSessionAutosavePersistedAt: Date = .distantPast
-    private var lastTypingActivityAt: TimeInterval = 0
     private var didHandleExplicitOpenIntentAtStartup = false
     private var isTerminatingApp = false
     private var didInstallLifecycleSnapshotObservers = false
@@ -3557,8 +3556,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
     private func remainingSessionAutosaveTypingQuietPeriod(
         nowUptime: TimeInterval = ProcessInfo.processInfo.systemUptime
     ) -> TimeInterval? {
-        guard lastTypingActivityAt > 0 else { return nil }
-        let elapsed = nowUptime - lastTypingActivityAt
+        let lastKeystroke = TypingBurstTracker.shared.lastKeystrokeAt
+        guard lastKeystroke > 0 else { return nil }
+        let elapsed = nowUptime - lastKeystroke
         guard elapsed < Self.sessionAutosaveTypingQuietPeriod else { return nil }
         return Self.sessionAutosaveTypingQuietPeriod - elapsed
     }
@@ -3657,9 +3657,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
         )
     }
 
-    fileprivate func recordTypingActivity() {
-        lastTypingActivityAt = ProcessInfo.processInfo.systemUptime
-    }
 
     nonisolated static func shouldWriteSessionSnapshotSynchronously(
         isTerminatingApp: Bool,
@@ -12409,10 +12406,10 @@ private extension NSWindow {
             CmuxTypingTiming.logEventDelay(path: "window.sendEvent", event: event)
         }
 #endif
-        // recordTypingActivity must run in all builds so runSessionAutosaveTick
-        // can honor the typing quiet period in release.
+        // TypingBurstTracker records keystroke timing for both burst detection
+        // and session autosave typing quiet period. Must run in all builds.
         if event.type == .keyDown {
-            AppDelegate.shared?.recordTypingActivity()
+            TypingBurstTracker.shared.markKeystroke()
         }
 #if DEBUG
         defer {
