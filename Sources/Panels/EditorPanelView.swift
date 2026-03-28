@@ -20,7 +20,7 @@ struct EditorPanelView: View {
                 if panel.isFileUnavailable {
                     fileUnavailableView
                 } else {
-                    EditorTextView(panel: panel)
+                    EditorTextView(panel: panel, onBecomeFirstResponder: onRequestPanelFocus)
                 }
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)

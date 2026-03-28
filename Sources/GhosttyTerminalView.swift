@@ -4,6 +4,7 @@ import AppKit
 import Metal
 import QuartzCore
 import Combine
+import CoreText
 import Darwin
 import Sentry
 import Bonsplit
@@ -897,6 +898,11 @@ class GhosttyApp {
 
     private(set) var app: ghostty_app_t?
     private(set) var config: ghostty_config_t?
+    /// Coalesce wakeup → tick dispatches.  The I/O thread may fire wakeup_cb
+    /// thousands of times per second during bulk output.  We only need one
+    /// pending tick on the main queue at any time.
+    private var _tickScheduled = false
+    private let _tickLock = NSLock()
     private(set) var defaultBackgroundColor: NSColor = .windowBackgroundColor
     private(set) var defaultBackgroundOpacity: Double = 1.0
     private static func resolveBackgroundLogURL(
@@ -1091,9 +1097,7 @@ class GhosttyApp {
         runtimeConfig.userdata = Unmanaged.passUnretained(self).toOpaque()
         runtimeConfig.supports_selection_clipboard = true
         runtimeConfig.wakeup_cb = { userdata in
-            DispatchQueue.main.async {
-                GhosttyApp.shared.tick()
-            }
+            GhosttyApp.shared.scheduleTick()
         }
         runtimeConfig.action_cb = { app, target, action in
             return GhosttyApp.shared.handleAction(target: target, action: action)
@@ -1362,15 +1366,12 @@ class GhosttyApp {
     /// monospace attributes (e.g. AB_appare from Adobe CC, or LingWai) can be
     /// selected depending on what is installed. This injects a sensible
     /// default based on the system's preferred languages without overriding
-    /// user-managed fallback chains.
+    /// user-managed fallback chains or configured fonts that already cover
+    /// the affected CJK ranges.
     ///
     /// See: https://github.com/manaflow-ai/cmux/pull/1017
     private func loadCJKFontFallbackIfNeeded(_ config: ghostty_config_t) {
-        let userFontConfig = Self.userFontConfigSummary()
-        if userFontConfig.containsCodepointMap { return }
-        if userFontConfig.hasExplicitFontFamilyFallbackChain { return }
-
-        guard let mappings = Self.cjkFontMappings() else { return }
+        guard let mappings = Self.autoInjectedCJKFontMappings() else { return }
 
         let lines = mappings.map { range, font in
             "font-codepoint-map = \(range)=\(font)"
@@ -1406,10 +1407,19 @@ class GhosttyApp {
         "U+30A0-U+30FF",  // Katakana
     ]
 
-    /// Unicode ranges specific to Korean (Hangul).
-    private static let koreanRanges = [
-        "U+AC00-U+D7AF",  // Hangul Syllables
-        "U+1100-U+11FF",  // Hangul Jamo
+    /// Representative scalars used to detect whether the configured primary
+    /// font already covers the ranges cmux would otherwise auto-map.
+    private static let cjkCoverageSampleCharactersByRange: [String: [UniChar]] = [
+        "U+3000-U+303F": [0x3001, 0x300C],
+        "U+4E00-U+9FFF": [0x4E00, 0x65E5, 0x6C34],
+        "U+F900-U+FAFF": [0xF900],
+        "U+FF00-U+FFEF": [0xFF10, 0xFF21],
+        "U+3400-U+4DBF": [0x3400],
+        "U+1100-U+11FF": [0x1100, 0x1161],
+        "U+3130-U+318F": [0x3131, 0x314F],
+        "U+3040-U+309F": [0x3042, 0x3093],
+        "U+30A0-U+30FF": [0x30A2, 0x30F3],
+        "U+AC00-U+D7AF": [0xAC00, 0xD55C],
     ]
 
     private struct UserFontConfigSummary {
@@ -1488,6 +1498,38 @@ class GhosttyApp {
         return mappings.isEmpty ? nil : mappings
     }
 
+    /// Returns only the CJK mappings cmux should auto-inject after respecting
+    /// explicit user overrides and the glyph coverage of the configured
+    /// primary font family.
+    static func autoInjectedCJKFontMappings(
+        preferredLanguages: [String] = Locale.preferredLanguages,
+        configPaths: [String] = loadedCJKScanPaths(),
+        rangeCoverageProbe: ((String, String) -> Bool)? = nil
+    ) -> [(String, String)]? {
+        guard var mappings = cjkFontMappings(preferredLanguages: preferredLanguages) else { return nil }
+
+        let summary = userFontConfigSummary(configPaths: configPaths)
+        if summary.containsCodepointMap || summary.hasExplicitFontFamilyFallbackChain {
+            return nil
+        }
+
+        guard let configuredFontFamily = summary.effectiveFontFamilies.first else {
+            return mappings
+        }
+
+        if let rangeCoverageProbe {
+            mappings.removeAll { range, _ in
+                rangeCoverageProbe(configuredFontFamily, range)
+            }
+        } else if let configuredFont = configuredCTFont(named: configuredFontFamily) {
+            mappings.removeAll { range, _ in
+                fontContainsGlyphs(configuredFont, forRange: range)
+            }
+        }
+
+        return mappings.isEmpty ? nil : mappings
+    }
+
     /// Checks whether the user's Ghostty config files already contain
     /// a `font-codepoint-map` entry covering CJK ranges. Also checks
     /// application-support config paths that cmux may load at runtime.
@@ -1505,11 +1547,58 @@ class GhosttyApp {
 
     static func shouldInjectCJKFontFallback(
         preferredLanguages: [String] = Locale.preferredLanguages,
-        configPaths: [String] = loadedCJKScanPaths()
+        configPaths: [String] = loadedCJKScanPaths(),
+        rangeCoverageProbe: ((String, String) -> Bool)? = nil
     ) -> Bool {
-        guard cjkFontMappings(preferredLanguages: preferredLanguages) != nil else { return false }
-        let summary = userFontConfigSummary(configPaths: configPaths)
-        return !summary.containsCodepointMap && !summary.hasExplicitFontFamilyFallbackChain
+        autoInjectedCJKFontMappings(
+            preferredLanguages: preferredLanguages,
+            configPaths: configPaths,
+            rangeCoverageProbe: rangeCoverageProbe
+        ) != nil
+    }
+
+    private static func configuredCTFont(
+        named name: String,
+        size: CGFloat = 12
+    ) -> CTFont? {
+        let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return nil }
+
+        let font = CTFontCreateWithName(trimmed as CFString, size, nil)
+        let normalizedRequestedName = normalizedFontName(trimmed)
+        let resolvedNames = [
+            kCTFontFamilyNameKey,
+            kCTFontFullNameKey,
+            kCTFontPostScriptNameKey,
+        ].compactMap { CTFontCopyName(font, $0) as String? }
+
+        guard resolvedNames.contains(where: { normalizedFontName($0) == normalizedRequestedName }) else {
+            return nil
+        }
+
+        return font
+    }
+
+    private static func fontContainsGlyphs(
+        _ font: CTFont,
+        forRange range: String
+    ) -> Bool {
+        guard let characters = cjkCoverageSampleCharactersByRange[range] else {
+            return false
+        }
+
+        var glyphs = Array(repeating: CGGlyph(), count: characters.count)
+        let hasGlyphs = CTFontGetGlyphsForCharacters(font, characters, &glyphs, characters.count)
+        return hasGlyphs && !glyphs.contains(0)
+    }
+
+    private static func normalizedFontName(_ name: String) -> String {
+        name
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .split(whereSeparator: \.isWhitespace)
+            .joined(separator: " ")
+            .folding(options: [.diacriticInsensitive, .widthInsensitive], locale: Locale(identifier: "en_US_POSIX"))
+            .lowercased()
     }
 
     private static func userFontConfigSummary(
@@ -1822,7 +1911,22 @@ class GhosttyApp {
         #endif
     }
 
+    /// Schedule a single tick on the main queue, coalescing multiple wakeups.
+    func scheduleTick() {
+        _tickLock.lock()
+        defer { _tickLock.unlock() }
+        guard !_tickScheduled else { return }
+        _tickScheduled = true
+        DispatchQueue.main.async {
+            self.tick()
+        }
+    }
+
     func tick() {
+        _tickLock.lock()
+        _tickScheduled = false
+        _tickLock.unlock()
+
         guard let app = app else { return }
 
         let start = CACurrentMediaTime()
@@ -2392,14 +2496,7 @@ class GhosttyApp {
             }
         case GHOSTTY_ACTION_SCROLLBAR:
             let scrollbar = GhosttyScrollbar(c: action.action.scrollbar)
-            DispatchQueue.main.async {
-                surfaceView.scrollbar = scrollbar
-                NotificationCenter.default.post(
-                    name: .ghosttyDidUpdateScrollbar,
-                    object: surfaceView,
-                    userInfo: [GhosttyNotificationKey.scrollbar: scrollbar]
-                )
-            }
+            surfaceView.enqueueScrollbarUpdate(scrollbar)
             return true
         case GHOSTTY_ACTION_CELL_SIZE:
             let cellSize = CGSize(
@@ -2474,7 +2571,7 @@ class GhosttyApp {
                   let surfaceId = surfaceView.terminalSurface?.id else { return true }
             let pwd = action.action.pwd.pwd.flatMap { String(cString: $0) } ?? ""
             DispatchQueue.main.async {
-                AppDelegate.shared?.tabManager?.updateSurfaceDirectory(
+                AppDelegate.shared?.tabManagerFor(tabId: tabId)?.updateSurfaceDirectory(
                     tabId: tabId,
                     surfaceId: surfaceId,
                     directory: pwd
@@ -2876,7 +2973,7 @@ final class TerminalSurface: Identifiable, ObservableObject {
         return val > 0 ? val : 10
     }()
     private let surfaceContext: ghostty_surface_context_e
-    private let configTemplate: ghostty_surface_config_s?
+    private let configTemplate: CmuxSurfaceConfigTemplate?
     private let workingDirectory: String?
     private let initialCommand: String?
     private let initialEnvironmentOverrides: [String: String]
@@ -2964,7 +3061,7 @@ final class TerminalSurface: Identifiable, ObservableObject {
     init(
         tabId: UUID,
         context: ghostty_surface_context_e,
-        configTemplate: ghostty_surface_config_s?,
+        configTemplate: CmuxSurfaceConfigTemplate?,
         workingDirectory: String? = nil,
         initialCommand: String? = nil,
         initialEnvironmentOverrides: [String: String] = [:],
@@ -3488,27 +3585,37 @@ final class TerminalSurface: Identifiable, ObservableObject {
 
         let scaleFactors = scaleFactors(for: view)
 
-        // Extract existing env vars from config template. Reading fields from
-        // the stored configTemplate is safe (no sret) — the template struct is
-        // already allocated as a stored property.
-        var env: [String: String] = [:]
-        if let template = configTemplate,
-           template.env_var_count > 0,
-           let existingEnv = template.env_vars {
-            // Validate the env_vars pointer before dereferencing — it may be a
-            // stale pointer from a ghostty_surface_inherited_config struct whose
-            // backing memory was freed. This is a defense-in-depth check for
-            // Intel Macs where freed memory is recycled aggressively (#1496, #1870).
-            let envPointerLive = malloc_size(UnsafeRawPointer(existingEnv)) > 0
-            let count = envPointerLive ? Int(template.env_var_count) : 0
-            for i in 0..<count {
-                let item = existingEnv[i]
-                if let key = String(cString: item.key, encoding: .utf8),
-                   let value = String(cString: item.value, encoding: .utf8) {
-                    env[key] = value
-                }
+        let baseConfig = configTemplate ?? CmuxSurfaceConfigTemplate()
+        var surfaceConfig = ghostty_surface_config_new()
+        surfaceConfig.font_size = baseConfig.fontSize
+        surfaceConfig.wait_after_command = baseConfig.waitAfterCommand
+        surfaceConfig.platform_tag = GHOSTTY_PLATFORM_MACOS
+        surfaceConfig.platform = ghostty_platform_u(macos: ghostty_platform_macos_s(
+            nsview: Unmanaged.passUnretained(view).toOpaque()
+        ))
+        let callbackContext = Unmanaged.passRetained(GhosttySurfaceCallbackContext(surfaceView: view, terminalSurface: self))
+        surfaceConfig.userdata = callbackContext.toOpaque()
+        surfaceCallbackContext?.release()
+        surfaceCallbackContext = callbackContext
+        surfaceConfig.scale_factor = scaleFactors.layer
+        surfaceConfig.context = surfaceContext
+#if DEBUG
+        let templateFontText = String(format: "%.2f", surfaceConfig.font_size)
+        dlog(
+            "zoom.create surface=\(id.uuidString.prefix(5)) context=\(cmuxSurfaceContextName(surfaceContext)) " +
+            "templateFont=\(templateFontText)"
+        )
+#endif
+        var envVars: [ghostty_env_var_s] = []
+        var envStorage: [(UnsafeMutablePointer<CChar>, UnsafeMutablePointer<CChar>)] = []
+        defer {
+            for (key, value) in envStorage {
+                free(key)
+                free(value)
             }
         }
+
+        var env = baseConfig.environmentVariables
 
         var protectedStartupEnvironmentKeys: Set<String> = []
         func setManagedEnvironmentValue(_ key: String, _ value: String) {
@@ -3623,26 +3730,53 @@ final class TerminalSurface: Identifiable, ObservableObject {
             initialEnvironmentOverrides: initialEnvironmentOverrides
         )
 
-        // Create callback context HERE (in createSurface's stack frame) so
-        // the UUID allocation never shares a frame with the ghostty_surface_config_new
-        // sret buffer. Swift -O can corrupt UUID VWT pointers when they coexist
-        // with the 112-byte sret write in the same stack frame — even inside an
-        // @inline(never) function.
-        let newCallbackContext = Unmanaged.passRetained(
-            GhosttySurfaceCallbackContext(surfaceView: view, terminalSurface: self)
-        )
-        surfaceCallbackContext?.release()
-        surfaceCallbackContext = newCallbackContext
+        let createSurface = { [self] in
+            if !envVars.isEmpty {
+                let envVarsCount = envVars.count
+                envVars.withUnsafeMutableBufferPointer { buffer in
+                    surfaceConfig.env_vars = buffer.baseAddress
+                    surfaceConfig.env_var_count = envVarsCount
+                    self.surface = ghostty_surface_new(app, &surfaceConfig)
+                }
+            } else {
+                self.surface = ghostty_surface_new(app, &surfaceConfig)
+            }
+        }
 
-        // All C struct interop (ghostty_surface_config_new sret, ghostty_surface_new)
-        // isolated in a separate @inline(never) stack frame.
-        surface = performSurfaceCreation(
-            app: app,
-            view: view,
-            callbackContext: newCallbackContext,
-            layerScaleFactor: scaleFactors.layer,
-            env: env
-        )
+        let resolvedWorkingDirectory: String? = {
+            if let workingDirectory, !workingDirectory.isEmpty {
+                return workingDirectory
+            }
+            return baseConfig.workingDirectory
+        }()
+        let resolvedCommand: String? = {
+            if let initialCommand, !initialCommand.isEmpty {
+                return initialCommand
+            }
+            return baseConfig.command
+        }()
+        let resolvedInitialInput = baseConfig.initialInput
+        func withOptionalCString<T>(_ value: String?, _ body: (UnsafePointer<CChar>?) -> T) -> T {
+            guard let value else {
+                return body(nil)
+            }
+            return value.withCString(body)
+        }
+
+        let createWithCommandAndWorkingDirectory = {
+            withOptionalCString(resolvedCommand) { cCommand in
+                surfaceConfig.command = cCommand
+                withOptionalCString(resolvedWorkingDirectory) { cWorkingDir in
+                    surfaceConfig.working_directory = cWorkingDir
+                    withOptionalCString(resolvedInitialInput) { cInitialInput in
+                        surfaceConfig.initial_input = cInitialInput
+                        createSurface()
+                    }
+                }
+            }
+        }
+
+        createWithCommandAndWorkingDirectory()
 
         if surface == nil {
             surfaceCallbackContext?.release()
@@ -3701,7 +3835,7 @@ final class TerminalSurface: Identifiable, ObservableObject {
         // config/scale reconciliation. If runtime points don't match the inherited
         // template points, re-apply via binding action so all creation paths
         // (new surface, split, new workspace) preserve zoom from the source terminal.
-        if let inheritedFontPoints = configTemplate?.font_size,
+        if let inheritedFontPoints = configTemplate?.fontSize,
            inheritedFontPoints > 0 {
             let currentFontPoints = cmuxCurrentSurfaceFontSizePoints(createdSurface)
             let shouldReapply = {
@@ -3747,100 +3881,6 @@ final class TerminalSurface: Identifiable, ObservableObject {
             "runtimeFont=\(runtimeFontText)"
         )
 #endif
-    }
-
-    // Swift -O whole-module optimization misallocates the 112-byte sret return
-    // buffer for ghostty_surface_config_new(), corrupting adjacent stack slots.
-    // Disabling optimization on this one-line wrapper prevents the misallocation
-    // while keeping everything else fully optimized. The function is trivially
-    // small so there is zero performance impact.
-    @_optimize(none)
-    private static func safeDefaultSurfaceConfig() -> ghostty_surface_config_s {
-        return ghostty_surface_config_new()
-    }
-
-    // Isolates C struct interop in a dedicated stack frame. The callback context
-    // (with its UUID allocation) is created in createSurface and passed in.
-    @inline(never)
-    private func performSurfaceCreation(
-        app: ghostty_app_t,
-        view: GhosttyNSView,
-        callbackContext: Unmanaged<GhosttySurfaceCallbackContext>,
-        layerScaleFactor: CGFloat,
-        env: [String: String]
-    ) -> ghostty_surface_t? {
-        var surfaceConfig = configTemplate ?? Self.safeDefaultSurfaceConfig()
-        surfaceConfig.platform_tag = GHOSTTY_PLATFORM_MACOS
-        surfaceConfig.platform = ghostty_platform_u(macos: ghostty_platform_macos_s(
-            nsview: Unmanaged.passUnretained(view).toOpaque()
-        ))
-        surfaceConfig.userdata = callbackContext.toOpaque()
-        surfaceConfig.scale_factor = layerScaleFactor
-        surfaceConfig.context = surfaceContext
-#if DEBUG
-        let templateFontText = String(format: "%.2f", surfaceConfig.font_size)
-        dlog(
-            "zoom.create surface=\(id.uuidString.prefix(5)) context=\(cmuxSurfaceContextName(surfaceContext)) " +
-            "templateFont=\(templateFontText)"
-        )
-#endif
-
-        var envVars: [ghostty_env_var_s] = []
-        var envStorage: [(UnsafeMutablePointer<CChar>, UnsafeMutablePointer<CChar>)] = []
-        defer {
-            for (key, value) in envStorage {
-                free(key)
-                free(value)
-            }
-        }
-
-        if !env.isEmpty {
-            envVars.reserveCapacity(env.count)
-            envStorage.reserveCapacity(env.count)
-            for (key, value) in env {
-                guard let keyPtr = strdup(key), let valuePtr = strdup(value) else { continue }
-                envStorage.append((keyPtr, valuePtr))
-                envVars.append(ghostty_env_var_s(key: keyPtr, value: valuePtr))
-            }
-        }
-
-        var resultSurface: ghostty_surface_t?
-
-        let doCreateSurface = {
-            if !envVars.isEmpty {
-                let envVarsCount = envVars.count
-                envVars.withUnsafeMutableBufferPointer { buffer in
-                    surfaceConfig.env_vars = buffer.baseAddress
-                    surfaceConfig.env_var_count = envVarsCount
-                    resultSurface = ghostty_surface_new(app, &surfaceConfig)
-                }
-            } else {
-                resultSurface = ghostty_surface_new(app, &surfaceConfig)
-            }
-        }
-
-        if let initialCommand, !initialCommand.isEmpty {
-            initialCommand.withCString { cCommand in
-                surfaceConfig.command = cCommand
-                if let workingDirectory, !workingDirectory.isEmpty {
-                    workingDirectory.withCString { cWorkingDir in
-                        surfaceConfig.working_directory = cWorkingDir
-                        doCreateSurface()
-                    }
-                } else {
-                    doCreateSurface()
-                }
-            }
-        } else if let workingDirectory, !workingDirectory.isEmpty {
-            workingDirectory.withCString { cWorkingDir in
-                surfaceConfig.working_directory = cWorkingDir
-                doCreateSurface()
-            }
-        } else {
-            doCreateSurface()
-        }
-
-        return resultSurface
     }
 
     @discardableResult
@@ -4309,7 +4349,51 @@ class GhosttyNSView: NSView, NSUserInterfaceValidations {
 
     weak var terminalSurface: TerminalSurface?
     var scrollbar: GhosttyScrollbar?
+    /// Pending scrollbar value written from the action callback thread;
+    /// read and cleared on the main thread by `flushPendingScrollbar()`.
+    /// Access is guarded by `_scrollbarLock` because the action callback
+    /// fires on Ghostty's I/O thread while the flush runs on main.
+    private var _pendingScrollbar: GhosttyScrollbar?
+    private var _scrollbarFlushScheduled = false
+    private let _scrollbarLock = NSLock()
     var cellSize: CGSize = .zero
+
+    /// Coalesce high-frequency scrollbar updates into a single main-thread
+    /// dispatch.  The action callback (which may fire thousands of times per
+    /// second during bulk output like `seq 1 100000`) stores the latest value
+    /// and schedules exactly one async flush.
+    func enqueueScrollbarUpdate(_ newValue: GhosttyScrollbar) {
+        _scrollbarLock.lock()
+        defer { _scrollbarLock.unlock() }
+        // Store the latest value (always overwrites — only the newest matters).
+        _pendingScrollbar = newValue
+        let needsSchedule = !_scrollbarFlushScheduled
+        if needsSchedule { _scrollbarFlushScheduled = true }
+
+        // If a flush is already scheduled, skip the dispatch — the scheduled
+        // block will pick up the latest value.
+        guard needsSchedule else { return }
+        DispatchQueue.main.async { [weak self] in
+            self?.flushPendingScrollbar()
+        }
+    }
+
+    private func flushPendingScrollbar() {
+        _scrollbarLock.lock()
+        _scrollbarFlushScheduled = false
+        let pending = _pendingScrollbar
+        _pendingScrollbar = nil
+        _scrollbarLock.unlock()
+
+        guard let pending else { return }
+        scrollbar = pending
+        NotificationCenter.default.post(
+            name: .ghosttyDidUpdateScrollbar,
+            object: self,
+            userInfo: [GhosttyNotificationKey.scrollbar: pending]
+        )
+    }
+
     var desiredFocus: Bool = false
     var suppressingReparentFocus: Bool = false
     var tabId: UUID?

@@ -130,7 +130,14 @@ final class LineNumberRulerView: NSRulerView {
 /// standard responder chain handles them.
 final class EditorNSTextView: NSTextView {
     var keyDownHandler: ((NSEvent) -> Bool)?
+    var onBecomeFirstResponder: (() -> Void)?
     weak var lineNumberRuler: LineNumberRulerView?
+
+    override func becomeFirstResponder() -> Bool {
+        let result = super.becomeFirstResponder()
+        if result { onBecomeFirstResponder?() }
+        return result
+    }
 
     override func keyDown(with event: NSEvent) {
         if keyDownHandler?(event) == true { return }
@@ -157,6 +164,7 @@ final class EditorNSTextView: NSTextView {
 /// it never copies the full string back on every keystroke.
 struct EditorTextView: NSViewRepresentable {
     @ObservedObject var panel: EditorPanel
+    var onBecomeFirstResponder: (() -> Void)?
 
     static let editorFont = NSFont.monospacedSystemFont(ofSize: 13, weight: .regular)
 
@@ -258,8 +266,10 @@ struct EditorTextView: NSViewRepresentable {
         textView.textContainer?.widthTracksTextView = true
 
         textView.keyDownHandler = context.coordinator.handleKeyDown
+        textView.onBecomeFirstResponder = onBecomeFirstResponder
         scrollView.documentView = textView
         context.coordinator.textView = textView
+        panel.focusableTextView = textView
         textView.textStorage?.delegate = context.coordinator
 
         // Line number ruler
@@ -294,12 +304,14 @@ struct EditorTextView: NSViewRepresentable {
             NotificationCenter.default.removeObserver(observer)
             coordinator.boundsObserver = nil
         }
+        coordinator.panel.focusableTextView = nil
     }
 
     // MARK: - updateNSView
 
     func updateNSView(_ scrollView: NSScrollView, context: Context) {
-        guard let textView = scrollView.documentView as? NSTextView else { return }
+        guard let textView = scrollView.documentView as? EditorNSTextView else { return }
+        textView.onBecomeFirstResponder = onBecomeFirstResponder
 
         // Only update when fileContentGeneration changed (external reload)
         if context.coordinator.lastContentGeneration != panel.fileContentGeneration {

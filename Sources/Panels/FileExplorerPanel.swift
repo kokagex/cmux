@@ -89,7 +89,15 @@ final class FileExplorerPanel: Panel, ObservableObject {
 
     // Debounce work items
     private var fsEventDebounceWork: DispatchWorkItem?
-    private var gitStatusDebounceWork: DispatchWorkItem?
+
+    // Git status throttle — serializes git status calls instead of debouncing.
+    // At most one git status runs at a time; if a request arrives during execution,
+    // a single pending re-run is scheduled after completion.
+    private var gitStatusRunning = false
+    private var gitStatusPending = false
+
+    // .git/index watcher — fires on git add, commit, checkout, reset, stash, etc.
+    private var gitIndexWatcher: FileWatcherHelper?
 
     // Burst-deferral flags — set to true when a refresh is skipped during a typing burst
     private var gitStatusDeferredDuringBurst = false
@@ -120,6 +128,7 @@ final class FileExplorerPanel: Panel, ObservableObject {
 
         reloadTree()
         startFSEventStream()
+        startGitIndexWatcher()
         refreshIgnoredPaths()
         refreshGitStatus()
 
@@ -135,7 +144,7 @@ final class FileExplorerPanel: Panel, ObservableObject {
             }
             if self.gitStatusDeferredDuringBurst {
                 self.gitStatusDeferredDuringBurst = false
-                Task { await self.performGitStatusRefresh() }
+                self.refreshGitStatus()
             }
         }
     }
@@ -166,9 +175,11 @@ final class FileExplorerPanel: Panel, ObservableObject {
     /// Update root path and restart FS watching + git status.
     private func updateRoot(_ newRoot: String) {
         stopFSEventStream()
+        gitIndexWatcher?.stop()
         rootPath = newRoot
         gitStatusProvider = GitStatusProvider(rootPath: newRoot)
         startFSEventStream()
+        startGitIndexWatcher()
         refreshIgnoredPaths()
         refreshGitStatus()
     }
@@ -216,8 +227,9 @@ final class FileExplorerPanel: Panel, ObservableObject {
             burstEndObserver = nil
         }
         stopFSEventStream()
+        gitIndexWatcher?.stop()
+        gitIndexWatcher = nil
         fsEventDebounceWork?.cancel()
-        gitStatusDebounceWork?.cancel()
         gitStatusTask?.cancel()
         ignoredPathsTask?.cancel()
     }
@@ -333,33 +345,49 @@ final class FileExplorerPanel: Panel, ObservableObject {
         }
     }
 
-    // MARK: - Git status
+    // MARK: - Git status (throttle)
 
-    /// Asynchronously refreshes the git status, debounced by 1 second.
+    /// Requests a git status refresh. Serialized: at most one `git status`
+    /// process runs at a time. If called while one is already running, a
+    /// single re-run is scheduled after completion. This avoids piling up
+    /// redundant git processes while staying responsive.
     func refreshGitStatus() {
         if TypingBurstTracker.shared.isBurstingUnchecked {
             gitStatusDeferredDuringBurst = true
             return
         }
-        gitStatusDebounceWork?.cancel()
-        let work = DispatchWorkItem { [weak self] in
-            guard let self else { return }
-            Task { @MainActor in
-                await self.performGitStatusRefresh()
-            }
+        if gitStatusRunning {
+            gitStatusPending = true
+            return
         }
-        gitStatusDebounceWork = work
-        DispatchQueue.main.asyncAfter(deadline: .now() + 1.0, execute: work)
+        gitStatusRunning = true
+        gitStatusTask?.cancel()
+        gitStatusTask = Task { @MainActor in
+            await self.performGitStatusRefresh()
+        }
     }
 
     private func performGitStatusRefresh() async {
-        guard !isClosed, let provider = gitStatusProvider else { return }
+        guard !isClosed, let provider = gitStatusProvider else {
+            gitStatusRunning = false
+            return
+        }
         let statuses = await provider.fetchStatuses()
-        guard !isClosed else { return }
+        guard !isClosed else {
+            gitStatusRunning = false
+            return
+        }
         gitStatuses = statuses
         applyGitStatuses(statuses, to: rootNodes)
         gitAutoExpandPaths = computeAutoExpandPaths(statuses: statuses)
         treeGeneration += 1
+
+        // Throttle drain: if another request arrived while running, re-run once.
+        gitStatusRunning = false
+        if gitStatusPending {
+            gitStatusPending = false
+            refreshGitStatus()
+        }
     }
 
     /// Asynchronously refreshes the set of git-ignored paths.
@@ -395,7 +423,7 @@ final class FileExplorerPanel: Panel, ObservableObject {
         guard eventStream == nil else { return }
 
         let pathsToWatch = [rootPath] as CFArray
-        let latency: CFTimeInterval = 0.5 // 500 ms coalesce window
+        let latency: CFTimeInterval = 0.3 // 300 ms coalesce window (JetBrains-level)
 
         // Use Unmanaged to bridge self as a raw pointer into the C callback.
         let selfPtr = Unmanaged.passRetained(self).toOpaque()
@@ -445,6 +473,7 @@ final class FileExplorerPanel: Panel, ObservableObject {
     }
 
     /// Debounced handler for FSEvent callbacks.
+    /// Reloads the file tree and refreshes git status for working-tree changes.
     func handleFSEvents() {
         if TypingBurstTracker.shared.isBurstingUnchecked {
             fsEventsDeferredDuringBurst = true
@@ -454,10 +483,42 @@ final class FileExplorerPanel: Panel, ObservableObject {
         let work = DispatchWorkItem { [weak self] in
             guard let self, !self.isClosed else { return }
             self.reloadTree()
+            // Working-tree file edits change git status (tracked → modified) but
+            // don't touch .git/index, so FSEvents still triggers a git refresh.
             self.refreshGitStatus()
         }
         fsEventDebounceWork = work
-        DispatchQueue.main.asyncAfter(deadline: .now() + 1.0, execute: work)
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5, execute: work)
+    }
+
+    // MARK: - Git index watcher
+
+    /// Watches `.git/index` with a DispatchSource for immediate git-operation
+    /// detection. Fires on git add, commit, checkout, reset, stash, merge, etc.
+    private func startGitIndexWatcher() {
+        gitIndexWatcher?.stop()
+        let indexPath = rootPath + "/.git/index"
+        guard FileManager.default.fileExists(atPath: indexPath) else { return }
+
+        let watcher = FileWatcherHelper(
+            onChange: { [weak self] changeKind in
+                guard let self, !self.isClosed else { return }
+                switch changeKind {
+                case .contentChanged:
+                    self.refreshGitStatus()
+                case .deletedOrRenamed:
+                    // Atomic writes replace the index file — reattach.
+                    self.refreshGitStatus()
+                    self.gitIndexWatcher?.reattach()
+                }
+            },
+            onReattach: { [weak self] in
+                guard let self, !self.isClosed else { return }
+                self.refreshGitStatus()
+            }
+        )
+        self.gitIndexWatcher = watcher
+        watcher.start(filePath: indexPath)
     }
 
     // MARK: - Deinit

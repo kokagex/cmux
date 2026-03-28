@@ -16,7 +16,7 @@ Tagged reload script を使う:
 コンパイル確認だけなら tagged derivedDataPath:
 
 ```bash
-xcodebuild -project GhosttyTabs.xcodeproj -scheme cmux -configuration Debug -destination 'platform=macOS' -derivedDataPath /tmp/cmux-<your-tag> build
+xcodebuild -project GhosttyTabs.xcodeproj -scheme cmux -configuration Debug -destination 'platform=macOS' -derivedDataPath DerivedData/cmux-<your-tag> build
 ```
 
 ## Release builds

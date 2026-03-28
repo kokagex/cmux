@@ -1,3 +1,4 @@
+import AppKit
 import Foundation
 import Combine
 
@@ -63,6 +64,9 @@ final class EditorPanel: Panel, ObservableObject {
     /// so the view knows to update NSTextView.
     @Published private(set) var fileContentGeneration: Int = 0
 
+    /// Weak reference to the backing NSTextView for programmatic focus.
+    weak var focusableTextView: EditorNSTextView?
+
     private(set) var workspaceId: UUID
     private var fileWatcher: FileWatcherHelper?
 
@@ -83,7 +87,8 @@ final class EditorPanel: Panel, ObservableObject {
     // MARK: - Panel protocol
 
     func focus() {
-        // Focus is managed by EditorTextView (NSViewRepresentable).
+        guard let textView = focusableTextView else { return }
+        textView.window?.makeFirstResponder(textView)
     }
 
     func unfocus() {
