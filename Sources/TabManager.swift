@@ -448,9 +448,26 @@ final class NotificationBurstCoalescer {
     private let delay: TimeInterval
     private var isFlushScheduled = false
     private var pendingAction: (() -> Void)?
+    private var suppressedDuringBurst = false
+    private var burstEndObserver: NSObjectProtocol?
 
     init(delay: TimeInterval = 1.0 / 30.0) {
         self.delay = max(0, delay)
+        burstEndObserver = NotificationCenter.default.addObserver(
+            forName: TypingBurstTracker.burstDidEndNotification,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            guard let self, self.suppressedDuringBurst else { return }
+            self.suppressedDuringBurst = false
+            self.flush()
+        }
+    }
+
+    deinit {
+        if let observer = burstEndObserver {
+            NotificationCenter.default.removeObserver(observer)
+        }
     }
 
     func signal(_ action: @escaping () -> Void) {
@@ -463,13 +480,23 @@ final class NotificationBurstCoalescer {
         guard !isFlushScheduled else { return }
         isFlushScheduled = true
         DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [weak self] in
-            self?.flush()
+            self?.tryFlush()
         }
+    }
+
+    private func tryFlush() {
+        isFlushScheduled = false
+        if TypingBurstTracker.shared.isBursting {
+            suppressedDuringBurst = true
+            return
+        }
+        flush()
     }
 
     private func flush() {
         precondition(Thread.isMainThread, "NotificationBurstCoalescer must be used on the main thread")
         isFlushScheduled = false
+        suppressedDuringBurst = false
         guard let action = pendingAction else { return }
         pendingAction = nil
         action()
