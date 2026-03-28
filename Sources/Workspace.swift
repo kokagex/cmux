@@ -9538,7 +9538,17 @@ final class Workspace: Identifiable, ObservableObject {
         isAttemptingLayoutFollowUp = true
         defer { isAttemptingLayoutFollowUp = false }
 
-        flushWorkspaceWindowLayouts()
+        // Only flush layouts when geometry, portal, or browser work is pending.
+        // Terminal-focus-only follow-ups don't need a full layout pass — the
+        // expensive displayIfNeeded() on all windows delays keystroke processing
+        // when the user switches from a panel back to the terminal.
+        let needsLayoutFlush =
+            layoutFollowUpNeedsGeometryPass ||
+            layoutFollowUpBrowserPanelId != nil ||
+            layoutFollowUpBrowserExitFocusPanelId != nil
+        if needsLayoutFlush {
+            flushWorkspaceWindowLayouts()
+        }
 
         let geometryPendingBefore = layoutFollowUpNeedsGeometryPass
         let terminalPortalPendingBefore = terminalPortalVisibilityNeedsFollowUp()

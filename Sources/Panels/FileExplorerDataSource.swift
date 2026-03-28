@@ -4,7 +4,7 @@ import UniformTypeIdentifiers
 // MARK: - FileExplorerDataSource
 
 @MainActor
-final class FileExplorerDataSource: NSObject, NSOutlineViewDataSource, NSOutlineViewDelegate {
+final class FileExplorerDataSource: NSObject, NSOutlineViewDataSource, NSOutlineViewDelegate, NSTextFieldDelegate {
 
     weak var panel: FileExplorerPanel?
     weak var outlineView: NSOutlineView?
@@ -15,6 +15,9 @@ final class FileExplorerDataSource: NSObject, NSOutlineViewDataSource, NSOutline
 
     /// Debounce work item for single-click preview to avoid rapid editor creation.
     private var previewDebounceWork: DispatchWorkItem?
+
+    /// The node currently being renamed via inline editing, or nil.
+    private var editingNode: FileNode?
 
     // MARK: - NSOutlineViewDataSource
 
@@ -172,9 +175,14 @@ final class FileExplorerDataSource: NSObject, NSOutlineViewDataSource, NSOutline
     }
 
     @objc func contextNewFile(_ sender: Any?) {
-        guard let node = clickedNode(), let panel else { return }
+        guard let panel else { return }
 
-        let dirURL = node.isDirectory ? node.url : node.url.deletingLastPathComponent()
+        let dirURL: URL
+        if let node = clickedNode() {
+            dirURL = node.isDirectory ? node.url : node.url.deletingLastPathComponent()
+        } else {
+            dirURL = URL(fileURLWithPath: panel.rootPath)
+        }
         var destURL = dirURL.appendingPathComponent("untitled")
         var counter = 1
         while FileManager.default.fileExists(atPath: destURL.path) {
@@ -186,9 +194,14 @@ final class FileExplorerDataSource: NSObject, NSOutlineViewDataSource, NSOutline
     }
 
     @objc func contextNewFolder(_ sender: Any?) {
-        guard let node = clickedNode(), let panel else { return }
+        guard let panel else { return }
 
-        let dirURL = node.isDirectory ? node.url : node.url.deletingLastPathComponent()
+        let dirURL: URL
+        if let node = clickedNode() {
+            dirURL = node.isDirectory ? node.url : node.url.deletingLastPathComponent()
+        } else {
+            dirURL = URL(fileURLWithPath: panel.rootPath)
+        }
         var destURL = dirURL.appendingPathComponent("untitled folder")
         var counter = 1
         while FileManager.default.fileExists(atPath: destURL.path) {
@@ -200,7 +213,86 @@ final class FileExplorerDataSource: NSObject, NSOutlineViewDataSource, NSOutline
     }
 
     @objc func contextRename(_ sender: Any?) {
-        // TODO: Implement inline editing via outlineView(_:shouldEdit:item:) and text field editing
+        guard let node = clickedNode(), let outlineView else { return }
+        let row = outlineView.row(forItem: node)
+        guard row >= 0,
+              let cellView = outlineView.view(atColumn: 0, row: row, makeIfNecessary: false) as? FileExplorerCellView
+        else { return }
+
+        editingNode = node
+        panel?.isEditing = true
+
+        let textField = cellView.nameLabel
+        textField.isEditable = true
+        textField.isSelectable = true
+        textField.delegate = self
+
+        // Delay makeFirstResponder to the next run loop iteration so that
+        // the context menu's tracking loop cleanup does not steal focus back
+        // from the field editor.
+        DispatchQueue.main.async {
+            outlineView.window?.makeFirstResponder(textField)
+
+            // Select the name without extension for files
+            if !node.isDirectory, let fieldEditor = textField.currentEditor() {
+                let name = node.name
+                if let dotRange = name.range(of: ".", options: .backwards), dotRange.lowerBound != name.startIndex {
+                    let prefixLength = name.distance(from: name.startIndex, to: dotRange.lowerBound)
+                    fieldEditor.selectedRange = NSRange(location: 0, length: prefixLength)
+                }
+            }
+        }
+    }
+
+    // MARK: - NSTextFieldDelegate (inline rename)
+
+    func controlTextDidEndEditing(_ obj: Notification) {
+        guard let textField = obj.object as? NSTextField,
+              let node = editingNode else { return }
+
+        let newName = textField.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
+
+        // Reset cell to label state
+        textField.isEditable = false
+        textField.isSelectable = false
+        textField.delegate = nil
+        editingNode = nil
+
+        // Validate and perform rename
+        guard !newName.isEmpty, newName != node.name else {
+            textField.stringValue = node.name
+            panel?.endEditing()
+            return
+        }
+
+        let sourceURL = node.url
+        let destURL = sourceURL.deletingLastPathComponent().appendingPathComponent(newName)
+
+        do {
+            try FileManager.default.moveItem(at: sourceURL, to: destURL)
+        } catch {
+            textField.stringValue = node.name
+        }
+
+        panel?.endEditing()
+    }
+
+    func control(_ control: NSControl, textView: NSTextView, doCommandBy commandSelector: Selector) -> Bool {
+        if commandSelector == #selector(NSResponder.cancelOperation(_:)) {
+            // Escape — cancel rename
+            guard let node = editingNode else { return false }
+            if let textField = control as? NSTextField {
+                textField.stringValue = node.name
+                textField.isEditable = false
+                textField.isSelectable = false
+                textField.delegate = nil
+            }
+            editingNode = nil
+            panel?.endEditing()
+            outlineView?.window?.makeFirstResponder(outlineView)
+            return true
+        }
+        return false
     }
 
     @objc func contextDelete(_ sender: Any?) {
@@ -223,7 +315,7 @@ final class FileExplorerDataSource: NSObject, NSOutlineViewDataSource, NSOutline
 
     private func clickedNode() -> FileNode? {
         guard let outlineView else { return nil }
-        let row = outlineView.clickedRow >= 0 ? outlineView.clickedRow : outlineView.selectedRow
+        let row = outlineView.clickedRow
         guard row >= 0 else { return nil }
         return outlineView.item(atRow: row) as? FileNode
     }

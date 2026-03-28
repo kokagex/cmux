@@ -104,6 +104,10 @@ final class FileExplorerPanel: Panel, ObservableObject {
     private var fsEventsDeferredDuringBurst = false
     private var burstEndObserver: NSObjectProtocol?
 
+    // Inline editing state — suppresses tree reloads while the user is renaming a file.
+    var isEditing: Bool = false
+    private var reloadDeferredDuringEditing = false
+
     // Async task handles
     private var gitStatusTask: Task<Void, Never>?
     private var ignoredPathsTask: Task<Void, Never>?
@@ -240,10 +244,24 @@ final class FileExplorerPanel: Panel, ObservableObject {
         focusFlashToken += 1
     }
 
+    /// Called when inline editing ends. Flushes any deferred tree reloads.
+    func endEditing() {
+        isEditing = false
+        if reloadDeferredDuringEditing {
+            reloadDeferredDuringEditing = false
+            reloadTree()
+            refreshGitStatus()
+        }
+    }
+
     // MARK: - File tree
 
     /// Reloads the root-level nodes from the filesystem.
     func reloadTree() {
+        if isEditing {
+            reloadDeferredDuringEditing = true
+            return
+        }
         let rootURL = URL(fileURLWithPath: rootPath)
         let rootNode = FileNode(url: rootURL, name: (rootPath as NSString).lastPathComponent, isDirectory: true)
         rootNode.loadChildren(showHidden: showHiddenFiles, ignoredPaths: showIgnoredFiles ? [] : ignoredPaths)
@@ -380,7 +398,11 @@ final class FileExplorerPanel: Panel, ObservableObject {
         gitStatuses = statuses
         applyGitStatuses(statuses, to: rootNodes)
         gitAutoExpandPaths = computeAutoExpandPaths(statuses: statuses)
-        treeGeneration += 1
+        if isEditing {
+            reloadDeferredDuringEditing = true
+        } else {
+            treeGeneration += 1
+        }
 
         // Throttle drain: if another request arrived while running, re-run once.
         gitStatusRunning = false

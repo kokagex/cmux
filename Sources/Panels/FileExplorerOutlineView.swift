@@ -48,7 +48,7 @@ struct FileExplorerOutlineView: NSViewRepresentable {
         let scrollView = NSScrollView()
         scrollView.hasVerticalScroller = true
         scrollView.autohidesScrollers = true
-        scrollView.drawsBackground = false
+        scrollView.drawsBackground = true
 
         // Outline view
         let outlineView = NSOutlineView()

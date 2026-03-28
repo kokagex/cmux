@@ -131,7 +131,7 @@ struct FileExplorerPanelView: View {
     }
 
     private var backgroundColor: Color {
-        Color(nsColor: GhosttyBackgroundTheme.currentColor())
+        Color(nsColor: .controlBackgroundColor)
     }
 
     private func changeRootPath() {
