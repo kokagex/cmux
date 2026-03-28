@@ -1,5 +1,5 @@
 # Code Index (auto-generated)
-Project: cmux | 220 files | 61,031L | Updated: 2026-03-28T10:49
+Project: cmux | 220 files | 61,031L | Updated: 2026-03-28T11:15
 
 ## DerivedData/SourcePackages/checkouts/Sparkle/Configurations/generate_latest_changes.py (23L)
 

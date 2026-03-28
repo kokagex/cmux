@@ -1,0 +1,117 @@
+<h2>File Explorer Panel — レイアウトモックアップ</h2>
+<p class="subtitle">パネルタブとして表示されるファイルエクスプローラーの構成</p>
+
+<div class="mockup">
+  <div class="mockup-header">File Explorer Panel</div>
+  <div class="mockup-body" style="background:#1e1e1e; color:#ccc; font-family:-apple-system,BlinkMacSystemFont,monospace; font-size:13px; padding:0;">
+
+    <!-- Toolbar -->
+    <div style="display:flex; align-items:center; gap:8px; padding:6px 10px; background:#2d2d2d; border-bottom:1px solid #404040;">
+      <span style="color:#569cd6;">📁</span>
+      <span style="color:#ddd; font-size:12px; flex:1; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">~/projects/cmux</span>
+      <div style="display:flex; align-items:center; background:#3c3c3c; border-radius:4px; padding:2px 8px; flex:0 0 140px;">
+        <span style="color:#888; font-size:11px;">🔍 Filter...</span>
+      </div>
+      <span style="color:#888; cursor:pointer;">⋯</span>
+    </div>
+
+    <!-- Tree -->
+    <div style="padding:4px 0; line-height:22px; font-size:12px;">
+
+      <div style="padding:0 8px; display:flex; align-items:center; gap:4px;">
+        <span style="color:#888; font-size:10px;">▼</span>
+        <span style="color:#c09553;">📁</span>
+        <span style="color:#ddd; font-weight:600;">Sources</span>
+      </div>
+
+        <div style="padding:0 8px 0 24px; display:flex; align-items:center; gap:4px;">
+          <span style="color:#888; font-size:10px;">▼</span>
+          <span style="color:#c09553;">📁</span>
+          <span style="color:#ddd;">Panels</span>
+        </div>
+
+          <div style="padding:0 8px 0 48px; display:flex; align-items:center; gap:4px;">
+            <span style="color:#e8ab53;">🟠</span>
+            <span style="color:#e8ab53;">BrowserPanel.swift</span>
+            <span style="color:#e8ab53; font-size:10px; margin-left:auto;">M</span>
+          </div>
+
+          <div style="padding:0 8px 0 48px; display:flex; align-items:center; gap:4px; background:#2a2d2e;">
+            <span>📄</span>
+            <span style="color:#73c991;">FileExplorerPanel.swift</span>
+            <span style="color:#73c991; font-size:10px; margin-left:auto;">A</span>
+          </div>
+
+          <div style="padding:0 8px 0 48px; display:flex; align-items:center; gap:4px;">
+            <span>📄</span>
+            <span style="color:#ddd;">MarkdownPanel.swift</span>
+          </div>
+
+          <div style="padding:0 8px 0 48px; display:flex; align-items:center; gap:4px;">
+            <span>📄</span>
+            <span style="color:#ddd;">Panel.swift</span>
+          </div>
+
+          <div style="padding:0 8px 0 48px; display:flex; align-items:center; gap:4px;">
+            <span>📄</span>
+            <span style="color:#ddd;">TerminalPanel.swift</span>
+          </div>
+
+        <div style="padding:0 8px 0 24px; display:flex; align-items:center; gap:4px;">
+          <span style="color:#888; font-size:10px;">▶</span>
+          <span style="color:#c09553;">📁</span>
+          <span style="color:#ddd;">Config</span>
+        </div>
+
+        <div style="padding:0 8px 0 24px; display:flex; align-items:center; gap:4px;">
+          <span>📄</span>
+          <span style="color:#e8ab53;">AppDelegate.swift</span>
+          <span style="color:#e8ab53; font-size:10px; margin-left:auto;">M</span>
+        </div>
+
+        <div style="padding:0 8px 0 24px; display:flex; align-items:center; gap:4px;">
+          <span>📄</span>
+          <span style="color:#ddd;">ContentView.swift</span>
+        </div>
+
+        <div style="padding:0 8px 0 24px; display:flex; align-items:center; gap:4px;">
+          <span>📄</span>
+          <span style="color:#ddd;">Workspace.swift</span>
+        </div>
+
+      <div style="padding:0 8px; display:flex; align-items:center; gap:4px;">
+        <span style="color:#888; font-size:10px;">▶</span>
+        <span style="color:#c09553;">📁</span>
+        <span style="color:#ddd; font-weight:600;">Resources</span>
+      </div>
+
+      <div style="padding:0 8px; display:flex; align-items:center; gap:4px;">
+        <span style="color:#888; font-size:10px;">▶</span>
+        <span style="color:#c09553;">📁</span>
+        <span style="color:#ddd; font-weight:600;">ghostty</span>
+      </div>
+
+      <div style="padding:0 8px; display:flex; align-items:center; gap:4px;">
+        <span>📄</span>
+        <span style="color:#ddd;">CLAUDE.md</span>
+      </div>
+
+      <div style="padding:0 8px; display:flex; align-items:center; gap:4px;">
+        <span>📄</span>
+        <span style="color:#ddd;">CHANGELOG.md</span>
+      </div>
+
+    </div>
+  </div>
+</div>
+
+<div style="margin-top:20px;">
+  <h3>Git ステータス凡例</h3>
+  <div style="display:grid; grid-template-columns:auto 1fr; gap:4px 12px; font-size:14px; max-width:400px;">
+    <span style="color:#e8ab53;">■ M</span><span>Modified（変更あり）</span>
+    <span style="color:#73c991;">■ A</span><span>Added（新規追加）</span>
+    <span style="color:#e85454;">■ D</span><span>Deleted（削除済み）</span>
+    <span style="color:#888;">■ ?</span><span>Untracked（未追跡）</span>
+    <span style="color:#e89053;">■ C</span><span>Conflicted（コンフリクト）</span>
+  </div>
+</div>
