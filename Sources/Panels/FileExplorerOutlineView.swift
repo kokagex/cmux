@@ -15,14 +15,24 @@ struct FileExplorerOutlineView: NSViewRepresentable {
     final class Coordinator {
         let dataSource: FileExplorerDataSource
         var lastRenderedGeneration: Int = -1
+        /// Set to true during programmatic auto-expand to avoid recording as user action.
+        var isAutoExpanding: Bool = false
 
         init(panel: FileExplorerPanel, onFileOpen: @escaping (FileNode) -> Void, onFilePreview: ((FileNode) -> Void)?) {
             self.dataSource = FileExplorerDataSource()
             self.dataSource.panel = panel
             self.dataSource.onFileDoubleClick = onFileOpen
             self.dataSource.onFileSingleClick = onFilePreview
-            self.dataSource.onNodeExpand = { [weak panel] node in
+            self.dataSource.onNodeExpand = { [weak panel, weak self] node in
+                if self?.isAutoExpanding != true {
+                    panel?.userCollapsedPaths.remove(node.url.path)
+                }
                 panel?.refreshExpandedNode(node)
+            }
+            self.dataSource.onNodeCollapse = { [weak panel, weak self] node in
+                if self?.isAutoExpanding != true {
+                    panel?.userCollapsedPaths.insert(node.url.path)
+                }
             }
         }
     }
@@ -111,6 +121,16 @@ struct FileExplorerOutlineView: NSViewRepresentable {
         // Restore expanded state by matching URL paths
         restoreExpandedPaths(outlineView: outlineView, nodes: panel.rootNodes, expandedPaths: expandedPaths)
 
+        // Auto-expand directories containing git-changed files
+        coordinator.isAutoExpanding = true
+        autoExpandGitPaths(
+            outlineView: outlineView,
+            nodes: panel.rootNodes,
+            autoExpandPaths: panel.gitAutoExpandPaths,
+            userCollapsedPaths: panel.userCollapsedPaths
+        )
+        coordinator.isAutoExpanding = false
+
         // Restore selection
         restoreSelectedPaths(outlineView: outlineView, selectedPaths: selectedPaths)
 
@@ -163,6 +183,36 @@ struct FileExplorerOutlineView: NSViewRepresentable {
             node.isExpanded = true
             if let children = node.children {
                 restoreExpandedPaths(outlineView: outlineView, nodes: children, expandedPaths: expandedPaths)
+            }
+        }
+    }
+
+    /// Auto-expand directories that contain files with git changes,
+    /// unless the user has manually collapsed them.
+    private func autoExpandGitPaths(
+        outlineView: NSOutlineView,
+        nodes: [FileNode],
+        autoExpandPaths: Set<String>,
+        userCollapsedPaths: Set<String>
+    ) {
+        for node in nodes {
+            guard node.isDirectory else { continue }
+            let path = node.url.path
+            guard autoExpandPaths.contains(path) else { continue }
+            guard !userCollapsedPaths.contains(path) else { continue }
+
+            if !outlineView.isItemExpanded(node) {
+                outlineView.expandItem(node)
+                node.isExpanded = true
+            }
+
+            if let children = node.children {
+                autoExpandGitPaths(
+                    outlineView: outlineView,
+                    nodes: children,
+                    autoExpandPaths: autoExpandPaths,
+                    userCollapsedPaths: userCollapsedPaths
+                )
             }
         }
     }

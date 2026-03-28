@@ -47,6 +47,12 @@ final class FileExplorerPanel: Panel, ObservableObject {
     /// Set of absolute paths that are git-ignored.
     @Published private(set) var ignoredPaths: Set<String> = []
 
+    /// Directory paths that should be auto-expanded because they contain git-changed files.
+    @Published private(set) var gitAutoExpandPaths: Set<String> = []
+
+    /// Directory paths the user has manually collapsed — auto-expand will not override these.
+    var userCollapsedPaths: Set<String> = []
+
     /// Whether to show files whose names start with `.`.
     @Published var showHiddenFiles: Bool = true {
         didSet { reloadTree() }
@@ -208,6 +214,7 @@ final class FileExplorerPanel: Panel, ObservableObject {
         let nodes = rootNode.children ?? []
         rootNodes = nodes
         applyGitStatuses(gitStatuses, to: rootNodes)
+        gitAutoExpandPaths = computeAutoExpandPaths(statuses: gitStatuses)
         treeGeneration += 1
     }
 
@@ -248,25 +255,13 @@ final class FileExplorerPanel: Panel, ObservableObject {
                 return
             }
 
+            // Directories stay unmodified — individual files show their own status
+            node.gitStatus = .unmodified
+
             if let children = node.children {
                 for child in children {
                     applyGitStatusRecursive(child, statuses: statuses, ignoredPrefixes: ignoredPrefixes)
                 }
-                // Directory status = most significant child status
-                node.gitStatus = children.reduce(GitFileStatus.unmodified) { result, child in
-                    Self.statusPriority(child.gitStatus) > Self.statusPriority(result) ? child.gitStatus : result
-                }
-            } else {
-                // Collapsed directory: scan statuses dict for any descendant
-                let prefix = path + "/"
-                var highest = GitFileStatus.unmodified
-                for (filePath, status) in statuses {
-                    guard filePath.hasPrefix(prefix) else { continue }
-                    if Self.statusPriority(status) > Self.statusPriority(highest) {
-                        highest = status
-                    }
-                }
-                node.gitStatus = highest
             }
         } else {
             if let status = statuses[path] {
@@ -277,6 +272,27 @@ final class FileExplorerPanel: Panel, ObservableObject {
                 node.gitStatus = isIgnored ? .ignored : .unmodified
             }
         }
+    }
+
+    /// Computes directory paths that should be auto-expanded because they contain
+    /// files with non-trivial git status (modified, added, deleted, etc.).
+    private func computeAutoExpandPaths(statuses: [String: GitFileStatus]) -> Set<String> {
+        let rootPrefix = rootPath + "/"
+        var paths = Set<String>()
+
+        for (filePath, status) in statuses {
+            guard status != .unmodified && status != .ignored else { continue }
+            guard filePath.hasPrefix(rootPrefix) else { continue }
+
+            // Walk up from the file's parent to the root, adding each directory
+            var current = (filePath as NSString).deletingLastPathComponent
+            while current.count > rootPath.count, current.hasPrefix(rootPrefix) {
+                paths.insert(current)
+                current = (current as NSString).deletingLastPathComponent
+            }
+        }
+
+        return paths
     }
 
     /// Priority order for git statuses — higher means more significant.
@@ -313,6 +329,7 @@ final class FileExplorerPanel: Panel, ObservableObject {
         guard !isClosed else { return }
         gitStatuses = statuses
         applyGitStatuses(statuses, to: rootNodes)
+        gitAutoExpandPaths = computeAutoExpandPaths(statuses: statuses)
         treeGeneration += 1
     }
 
