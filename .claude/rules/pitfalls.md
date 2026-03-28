@@ -10,6 +10,8 @@ These are typing-latency-sensitive paths and architectural contracts. Read caref
 
 - **`TerminalSurface.forceRefresh()`** in `GhosttyTerminalView.swift`: called on every keystroke. Do not add allocations, file I/O, or formatting here.
 
+- **`TypingBurstTracker.markKeystroke()`** in `TypingBurstTracker.swift`: called on every keyDown from `cmux_sendEvent`. Must be zero-allocation (timestamp write + asyncAfter only). Do not add allocations, NotificationCenter posts on the hot path beyond the existing begin/end posts, or any I/O.
+
 ## Architectural contracts
 
 - **Custom UTTypes** for drag-and-drop must be declared in `Resources/Info.plist` under `UTExportedTypeDeclarations` (e.g. `com.splittabbar.tabtransfer`, `com.cmux.sidebar-tab-reorder`).
