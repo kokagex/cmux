@@ -47,3 +47,7 @@ tests/visual_report.html
 # Local scratch (screenshots, etc.)
 tmp/
 tmp-*/
+
+# Harness ephemeral files (sprint-log/ and evaluation/ are git-managed)
+harness/current-sprint*.md
+harness/specs/
