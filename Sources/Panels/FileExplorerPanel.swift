@@ -91,6 +91,11 @@ final class FileExplorerPanel: Panel, ObservableObject {
     private var fsEventDebounceWork: DispatchWorkItem?
     private var gitStatusDebounceWork: DispatchWorkItem?
 
+    // Burst-deferral flags — set to true when a refresh is skipped during a typing burst
+    private var gitStatusDeferredDuringBurst = false
+    private var fsEventsDeferredDuringBurst = false
+    private var burstEndObserver: NSObjectProtocol?
+
     // Async task handles
     private var gitStatusTask: Task<Void, Never>?
     private var ignoredPathsTask: Task<Void, Never>?
@@ -117,6 +122,22 @@ final class FileExplorerPanel: Panel, ObservableObject {
         startFSEventStream()
         refreshIgnoredPaths()
         refreshGitStatus()
+
+        burstEndObserver = NotificationCenter.default.addObserver(
+            forName: TypingBurstTracker.burstDidEndNotification,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            guard let self, !self.isClosed else { return }
+            if self.fsEventsDeferredDuringBurst {
+                self.fsEventsDeferredDuringBurst = false
+                self.reloadTree()
+            }
+            if self.gitStatusDeferredDuringBurst {
+                self.gitStatusDeferredDuringBurst = false
+                Task { await self.performGitStatusRefresh() }
+            }
+        }
     }
 
     /// Bind the file explorer to a workspace's currentDirectory so it follows
@@ -190,6 +211,10 @@ final class FileExplorerPanel: Panel, ObservableObject {
         isClosed = true
         directorySubscription?.cancel()
         directorySubscription = nil
+        if let observer = burstEndObserver {
+            NotificationCenter.default.removeObserver(observer)
+            burstEndObserver = nil
+        }
         stopFSEventStream()
         fsEventDebounceWork?.cancel()
         gitStatusDebounceWork?.cancel()
@@ -312,6 +337,10 @@ final class FileExplorerPanel: Panel, ObservableObject {
 
     /// Asynchronously refreshes the git status, debounced by 1 second.
     func refreshGitStatus() {
+        if TypingBurstTracker.shared.isBursting {
+            gitStatusDeferredDuringBurst = true
+            return
+        }
         gitStatusDebounceWork?.cancel()
         let work = DispatchWorkItem { [weak self] in
             guard let self else { return }
@@ -417,6 +446,10 @@ final class FileExplorerPanel: Panel, ObservableObject {
 
     /// Debounced handler for FSEvent callbacks.
     func handleFSEvents() {
+        if TypingBurstTracker.shared.isBursting {
+            fsEventsDeferredDuringBurst = true
+            return
+        }
         fsEventDebounceWork?.cancel()
         let work = DispatchWorkItem { [weak self] in
             guard let self, !self.isClosed else { return }
