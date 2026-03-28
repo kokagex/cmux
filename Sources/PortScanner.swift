@@ -34,6 +34,10 @@ final class PortScanner: @unchecked Sendable {
     /// Coalesce timer (200ms after first kick).
     private var coalesceTimer: DispatchSourceTimer?
 
+    /// Kicks deferred while a typing burst is active; flushed on burstDidEnd.
+    private var deferredKickKeys = Set<PanelKey>()
+    private var burstEndObserver: NSObjectProtocol?
+
     /// Burst scan offsets in seconds from the start of the burst.
     /// Each scan fires at this absolute offset; the recursive scheduler
     /// converts to relative delays between consecutive scans.
@@ -44,6 +48,30 @@ final class PortScanner: @unchecked Sendable {
     struct PanelKey: Hashable {
         let workspaceId: UUID
         let panelId: UUID
+    }
+
+    init() {
+        burstEndObserver = NotificationCenter.default.addObserver(
+            forName: TypingBurstTracker.burstDidEndNotification,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            guard let self else { return }
+            self.queue.async { [self] in
+                guard !self.deferredKickKeys.isEmpty else { return }
+                self.pendingKicks.formUnion(self.deferredKickKeys)
+                self.deferredKickKeys.removeAll()
+                if !self.burstActive {
+                    self.startCoalesce()
+                }
+            }
+        }
+    }
+
+    deinit {
+        if let observer = burstEndObserver {
+            NotificationCenter.default.removeObserver(observer)
+        }
     }
 
     func registerTTY(workspaceId: UUID, panelId: UUID, ttyName: String) {
@@ -66,6 +94,17 @@ final class PortScanner: @unchecked Sendable {
         queue.async { [self] in
             let key = PanelKey(workspaceId: workspaceId, panelId: panelId)
             guard ttyNames[key] != nil else { return }
+
+            // Check typing burst on main actor. If bursting, mark deferred
+            // and skip; burstDidEnd will re-kick.
+            let typingBursting = DispatchQueue.main.sync {
+                TypingBurstTracker.shared.isBursting
+            }
+            if typingBursting {
+                deferredKickKeys.insert(key)
+                return
+            }
+
             pendingKicks.insert(key)
 
             if !burstActive {
