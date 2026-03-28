@@ -847,6 +847,7 @@ class TabManager: ObservableObject {
     }
     private var agentPIDSweepTimer: DispatchSourceTimer?
     private var workspaceGitMetadataPollTimer: DispatchSourceTimer?
+    private var typingBurstEndGitObserver: NSObjectProtocol?
 #if DEBUG
     private var debugWorkspaceSwitchCounter: UInt64 = 0
     private var debugWorkspaceSwitchId: UInt64 = 0
@@ -938,11 +939,23 @@ class TabManager: ObservableObject {
             guard let self else { return }
             DispatchQueue.main.async { [weak self] in
                 guard let self else { return }
+                if TypingBurstTracker.shared.isBursting {
+                    // Skip this tick; burstDidEnd will trigger a refresh.
+                    return
+                }
                 self.refreshTrackedWorkspaceGitMetadata()
             }
         }
         timer.resume()
         workspaceGitMetadataPollTimer = timer
+
+        typingBurstEndGitObserver = NotificationCenter.default.addObserver(
+            forName: TypingBurstTracker.burstDidEndNotification,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            self?.refreshTrackedWorkspaceGitMetadata()
+        }
     }
 
     private func refreshTrackedWorkspaceGitMetadata() {
