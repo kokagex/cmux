@@ -488,7 +488,7 @@ final class NotificationBurstCoalescer {
 
     private func tryFlush() {
         isFlushScheduled = false
-        if burstEndObserver != nil, TypingBurstTracker.shared.isBursting {
+        if burstEndObserver != nil, TypingBurstTracker.shared.isBurstingUnchecked {
             suppressedDuringBurst = true
             return
         }
@@ -944,7 +944,7 @@ class TabManager: ObservableObject {
             guard let self else { return }
             DispatchQueue.main.async { [weak self] in
                 guard let self else { return }
-                if TypingBurstTracker.shared.isBursting {
+                if TypingBurstTracker.shared.isBurstingUnchecked {
                     // Skip this tick; burstDidEnd will trigger a refresh.
                     return
                 }

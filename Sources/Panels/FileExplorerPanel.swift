@@ -337,7 +337,7 @@ final class FileExplorerPanel: Panel, ObservableObject {
 
     /// Asynchronously refreshes the git status, debounced by 1 second.
     func refreshGitStatus() {
-        if TypingBurstTracker.shared.isBursting {
+        if TypingBurstTracker.shared.isBurstingUnchecked {
             gitStatusDeferredDuringBurst = true
             return
         }
@@ -446,7 +446,7 @@ final class FileExplorerPanel: Panel, ObservableObject {
 
     /// Debounced handler for FSEvent callbacks.
     func handleFSEvents() {
-        if TypingBurstTracker.shared.isBursting {
+        if TypingBurstTracker.shared.isBurstingUnchecked {
             fsEventsDeferredDuringBurst = true
             return
         }

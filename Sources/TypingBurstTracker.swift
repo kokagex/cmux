@@ -17,7 +17,16 @@ final class TypingBurstTracker {
     /// Whether a typing burst is currently active.
     /// NOT @Published — consumers must use NotificationCenter to avoid
     /// triggering SwiftUI re-evaluation during typing.
+    /// Use `isBurstingUnchecked` for non-isolated access from main-thread code
+    /// that the compiler cannot prove is on main actor.
     private(set) var isBursting: Bool = false
+
+    /// Read `isBursting` from non-isolated contexts that run on the main thread
+    /// (e.g. `NotificationBurstCoalescer.tryFlush()`, `PortScanner.kick()`).
+    /// Callers must ensure they are on the main thread.
+    nonisolated var isBurstingUnchecked: Bool {
+        MainActor.assumeIsolated { isBursting }
+    }
 
     /// System uptime of the last keystroke. Used by session autosave
     /// to calculate the typing quiet period.

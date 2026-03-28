@@ -95,7 +95,7 @@ final class PortScanner: @unchecked Sendable {
         // kick() is called from socket command handlers which dispatch to main, so
         // Thread.isMainThread will be true in practice. If somehow called off-main,
         // we skip deferral and let the scan proceed normally.
-        let bursting = Thread.isMainThread ? TypingBurstTracker.shared.isBursting : false
+        let bursting = Thread.isMainThread ? TypingBurstTracker.shared.isBurstingUnchecked : false
         queue.async { [self] in
             let key = PanelKey(workspaceId: workspaceId, panelId: panelId)
             guard ttyNames[key] != nil else { return }
