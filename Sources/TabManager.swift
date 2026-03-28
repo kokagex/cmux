@@ -451,16 +451,18 @@ final class NotificationBurstCoalescer {
     private var suppressedDuringBurst = false
     private var burstEndObserver: NSObjectProtocol?
 
-    init(delay: TimeInterval = 1.0 / 30.0) {
+    init(delay: TimeInterval = 1.0 / 30.0, burstAware: Bool = true) {
         self.delay = max(0, delay)
-        burstEndObserver = NotificationCenter.default.addObserver(
-            forName: TypingBurstTracker.burstDidEndNotification,
-            object: nil,
-            queue: .main
-        ) { [weak self] _ in
-            guard let self, self.suppressedDuringBurst else { return }
-            self.suppressedDuringBurst = false
-            self.flush()
+        if burstAware {
+            burstEndObserver = NotificationCenter.default.addObserver(
+                forName: TypingBurstTracker.burstDidEndNotification,
+                object: nil,
+                queue: .main
+            ) { [weak self] _ in
+                guard let self, self.suppressedDuringBurst else { return }
+                self.suppressedDuringBurst = false
+                self.flush()
+            }
         }
     }
 
@@ -486,7 +488,7 @@ final class NotificationBurstCoalescer {
 
     private func tryFlush() {
         isFlushScheduled = false
-        if TypingBurstTracker.shared.isBursting {
+        if burstEndObserver != nil, TypingBurstTracker.shared.isBursting {
             suppressedDuringBurst = true
             return
         }
@@ -907,6 +909,9 @@ class TabManager: ObservableObject {
         workspaceCycleCooldownTask?.cancel()
         agentPIDSweepTimer?.cancel()
         workspaceGitMetadataPollTimer?.cancel()
+        if let observer = typingBurstEndGitObserver {
+            NotificationCenter.default.removeObserver(observer)
+        }
     }
 
     // MARK: - Agent PID Sweep

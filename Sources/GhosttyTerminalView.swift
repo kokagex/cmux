@@ -458,7 +458,7 @@ final class GhosttyDefaultBackgroundNotificationDispatcher {
             )
         }
     ) {
-        coalescer = NotificationBurstCoalescer(delay: delay)
+        coalescer = NotificationBurstCoalescer(delay: delay, burstAware: false)
         self.logEvent = logEvent
         self.postNotification = postNotification
     }

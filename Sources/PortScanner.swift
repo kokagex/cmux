@@ -91,16 +91,16 @@ final class PortScanner: @unchecked Sendable {
     }
 
     func kick(workspaceId: UUID, panelId: UUID) {
+        // Read burst state on main (where TypingBurstTracker lives) without blocking.
+        // kick() is called from socket command handlers which dispatch to main, so
+        // Thread.isMainThread will be true in practice. If somehow called off-main,
+        // we skip deferral and let the scan proceed normally.
+        let bursting = Thread.isMainThread ? TypingBurstTracker.shared.isBursting : false
         queue.async { [self] in
             let key = PanelKey(workspaceId: workspaceId, panelId: panelId)
             guard ttyNames[key] != nil else { return }
 
-            // Check typing burst on main actor. If bursting, mark deferred
-            // and skip; burstDidEnd will re-kick.
-            let typingBursting = DispatchQueue.main.sync {
-                TypingBurstTracker.shared.isBursting
-            }
-            if typingBursting {
+            if bursting {
                 deferredKickKeys.insert(key)
                 return
             }
