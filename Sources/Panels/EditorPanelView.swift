@@ -120,6 +120,17 @@ struct EditorPanelView: View {
                     )
             }
 
+            // Encoding badge
+            Text(panel.detectedEncoding)
+                .font(.system(size: 10, design: .monospaced))
+                .foregroundColor(.secondary)
+                .padding(.horizontal, 5)
+                .padding(.vertical, 2)
+                .background(
+                    RoundedRectangle(cornerRadius: 3)
+                        .fill(Color.primary.opacity(0.06))
+                )
+
             // Line ending badge
             Text(panel.lineEnding.rawValue)
                 .font(.system(size: 10, design: .monospaced))

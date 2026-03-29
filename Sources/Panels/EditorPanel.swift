@@ -78,6 +78,9 @@ final class EditorPanel: Panel, ObservableObject {
 
     @Published private(set) var lineEnding: LineEnding = .lf
 
+    /// Detected file encoding, shown in toolbar.
+    @Published private(set) var detectedEncoding: String = "UTF-8"
+
     /// Weak reference to the backing NSTextView for programmatic focus.
     weak var focusableTextView: EditorNSTextView?
 
@@ -199,23 +202,48 @@ final class EditorPanel: Panel, ObservableObject {
         }
         isFileTooLarge = false
 
-        do {
-            let content = try String(contentsOfFile: filePath, encoding: .utf8)
-            lineEnding = content.contains("\r\n") ? .crlf : .lf
-            fileContent = content.replacingOccurrences(of: "\r\n", with: "\n")
-            isFileUnavailable = false
-        } catch {
-            // Fallback: try ISO Latin-1, which accepts all 256 byte values,
-            // covering legacy encodings like Windows-1252.
-            if let data = FileManager.default.contents(atPath: filePath),
-               let decoded = String(data: data, encoding: .isoLatin1) {
+        guard let data = FileManager.default.contents(atPath: filePath) else {
+            isFileUnavailable = true
+            fileContentGeneration += 1
+            return
+        }
+
+        // BOM detection for UTF-16
+        if data.count >= 2 {
+            let bom = data.prefix(2)
+            if bom == Data([0xFE, 0xFF]) || bom == Data([0xFF, 0xFE]) {
+                if let decoded = String(data: data, encoding: .utf16) {
+                    detectedEncoding = "UTF-16"
+                    lineEnding = decoded.contains("\r\n") ? .crlf : .lf
+                    fileContent = decoded.replacingOccurrences(of: "\r\n", with: "\n")
+                    isFileUnavailable = false
+                    fileContentGeneration += 1
+                    return
+                }
+            }
+        }
+
+        // Try encodings in order of likelihood
+        let encodings: [(String.Encoding, String)] = [
+            (.utf8, "UTF-8"),
+            (.utf16, "UTF-16"),
+            (.shiftJIS, "Shift-JIS"),
+            (.japaneseEUC, "EUC-JP"),
+            (.isoLatin1, "Latin-1"),
+        ]
+
+        for (encoding, name) in encodings {
+            if let decoded = String(data: data, encoding: encoding) {
+                detectedEncoding = name
                 lineEnding = decoded.contains("\r\n") ? .crlf : .lf
                 fileContent = decoded.replacingOccurrences(of: "\r\n", with: "\n")
                 isFileUnavailable = false
-            } else {
-                isFileUnavailable = true
+                fileContentGeneration += 1
+                return
             }
         }
+
+        isFileUnavailable = true
         fileContentGeneration += 1
     }
 
