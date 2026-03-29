@@ -1,6 +1,49 @@
 import SwiftUI
 import AppKit
 
+// MARK: - KeyboardOutlineView
+
+/// NSOutlineView subclass that handles keyboard navigation.
+final class KeyboardOutlineView: NSOutlineView {
+    var onReturn: ((FileNode) -> Void)?
+    var onDelete: (([URL]) -> Void)?
+
+    override func keyDown(with event: NSEvent) {
+        guard let chars = event.charactersIgnoringModifiers else {
+            super.keyDown(with: event)
+            return
+        }
+        let row = selectedRow
+        guard row >= 0, let node = item(atRow: row) as? FileNode else {
+            super.keyDown(with: event)
+            return
+        }
+
+        switch chars {
+        case "\r": // Return — open file or toggle directory
+            if node.isDirectory {
+                if isItemExpanded(node) { collapseItem(node) }
+                else { expandItem(node) }
+            } else {
+                onReturn?(node)
+            }
+        case "\u{7F}", "\u{F728}": // Delete / Forward Delete — trash
+            var urls: [URL] = []
+            for row in selectedRowIndexes {
+                if let n = item(atRow: row) as? FileNode { urls.append(n.url) }
+            }
+            if !urls.isEmpty { onDelete?(urls) }
+        case " ": // Space — toggle expand/collapse for directories
+            if node.isDirectory {
+                if isItemExpanded(node) { collapseItem(node) }
+                else { expandItem(node) }
+            }
+        default:
+            super.keyDown(with: event)
+        }
+    }
+}
+
 // MARK: - FileExplorerOutlineView
 
 /// NSViewRepresentable that wraps an NSOutlineView for browsing a FileExplorerPanel's file tree.
@@ -59,7 +102,7 @@ struct FileExplorerOutlineView: NSViewRepresentable {
         scrollView.layer?.backgroundColor = NSColor.controlBackgroundColor.cgColor
 
         // Outline view
-        let outlineView = NSOutlineView()
+        let outlineView = KeyboardOutlineView()
         outlineView.headerView = nil
         outlineView.indentationPerLevel = 16
         outlineView.rowHeight = 22
@@ -96,6 +139,20 @@ struct FileExplorerOutlineView: NSViewRepresentable {
 
         // Store reference so context menu actions can find the outline view
         ds.outlineView = outlineView
+
+        // Multi-select support
+        outlineView.allowsMultipleSelection = true
+
+        // Keyboard navigation callbacks
+        outlineView.onReturn = { [weak ds] node in
+            ds?.onFileDoubleClick?(node)
+        }
+        outlineView.onDelete = { [weak ds] urls in
+            NSWorkspace.shared.recycle(urls) { _, error in
+                guard error == nil else { return }
+                DispatchQueue.main.async { ds?.panel?.reloadTree() }
+            }
+        }
 
         // Mount in scroll view
         scrollView.documentView = outlineView

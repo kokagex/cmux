@@ -322,10 +322,20 @@ final class FileExplorerDataSource: NSObject, NSOutlineViewDataSource, NSOutline
     }
 
     @objc func contextDelete(_ sender: Any?) {
-        guard let node = clickedNode() else {
-            return
+        guard let outlineView else { return }
+        var urls: [URL] = []
+        // Prefer clicked node for context menu, otherwise use selection
+        if let node = clickedNode() {
+            urls = [node.url]
+        } else {
+            for row in outlineView.selectedRowIndexes {
+                if let node = outlineView.item(atRow: row) as? FileNode {
+                    urls.append(node.url)
+                }
+            }
         }
-        NSWorkspace.shared.recycle([node.url]) { [weak self] _, error in
+        guard !urls.isEmpty else { return }
+        NSWorkspace.shared.recycle(urls) { [weak self] _, error in
             guard error == nil else { return }
             DispatchQueue.main.async {
                 self?.panel?.reloadTree()
