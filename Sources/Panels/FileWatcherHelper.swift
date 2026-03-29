@@ -33,6 +33,15 @@ final class FileWatcherHelper {
     private var isStopped: Bool = false
     private let watchQueue = DispatchQueue(label: "com.cmux.file-watch", qos: .utility)
 
+    /// Debounce interval for coalescing rapid file events.
+    private static let debounceInterval: TimeInterval = 0.15
+
+    /// Pending debounce work item.
+    private var debounceWorkItem: DispatchWorkItem?
+
+    /// Accumulated event flags during debounce window.
+    private var pendingFlags: DispatchSource.FileSystemEvent = []
+
     /// Maximum number of reattach attempts after a file delete/rename event.
     private static let maxReattachAttempts = 6
     /// Delay between reattach attempts (total window: attempts * delay = 3s).
@@ -73,6 +82,9 @@ final class FileWatcherHelper {
     /// Stop watching. Safe to call multiple times.
     func stop() {
         isStopped = true
+        debounceWorkItem?.cancel()
+        debounceWorkItem = nil
+        pendingFlags = []
         stopFileWatcher()
         filePath = nil
     }
@@ -95,15 +107,23 @@ final class FileWatcherHelper {
         source.setEventHandler { [weak self] in
             guard let self else { return }
             let flags = source.data
-            if flags.contains(.delete) || flags.contains(.rename) {
-                DispatchQueue.main.async {
-                    self.stopFileWatcher()
-                    self.onChange(.deletedOrRenamed)
+            DispatchQueue.main.async {
+                self.pendingFlags.insert(flags)
+                self.debounceWorkItem?.cancel()
+                let item = DispatchWorkItem { [weak self] in
+                    guard let self else { return }
+                    let flags = self.pendingFlags
+                    self.pendingFlags = []
+                    if flags.contains(.delete) || flags.contains(.rename) {
+                        self.stopFileWatcher()
+                        self.onChange(.deletedOrRenamed)
+                    } else {
+                        self.onChange(.contentChanged)
+                    }
                 }
-            } else {
-                DispatchQueue.main.async {
-                    self.onChange(.contentChanged)
-                }
+                self.debounceWorkItem = item
+                DispatchQueue.main.asyncAfter(
+                    deadline: .now() + Self.debounceInterval, execute: item)
             }
         }
 

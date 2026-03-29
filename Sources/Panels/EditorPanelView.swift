@@ -43,7 +43,22 @@ struct EditorPanelView: View {
                     .background(Color.orange.opacity(0.1))
                     Divider()
                 }
-                if panel.isFileUnavailable {
+                if panel.isFileTooLarge {
+                    VStack(spacing: 12) {
+                        Image(systemName: "doc.badge.ellipsis")
+                            .font(.system(size: 40))
+                            .foregroundColor(.secondary)
+                        Text(String(localized: "editorPanel.tooLarge",
+                                    defaultValue: "File too large to edit"))
+                            .font(.headline)
+                            .foregroundColor(.primary)
+                        Text(String(localized: "editorPanel.tooLarge.hint",
+                                    defaultValue: "Files over 10 MB are not supported"))
+                            .font(.system(size: 12))
+                            .foregroundColor(.secondary)
+                    }
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                } else if panel.isFileUnavailable {
                     fileUnavailableView
                 } else {
                     EditorTextView(panel: panel, onBecomeFirstResponder: onRequestPanelFocus)

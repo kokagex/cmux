@@ -56,6 +56,9 @@ final class EditorPanel: Panel, ObservableObject {
     /// Whether the file has been deleted or is unreadable.
     @Published private(set) var isFileUnavailable: Bool = false
 
+    /// Set when the file exceeds the size limit.
+    @Published private(set) var isFileTooLarge: Bool = false
+
     /// Token incremented to trigger focus flash animation.
     @Published private(set) var focusFlashToken: Int = 0
 
@@ -77,6 +80,9 @@ final class EditorPanel: Panel, ObservableObject {
 
     /// Weak reference to the backing NSTextView for programmatic focus.
     weak var focusableTextView: EditorNSTextView?
+
+    /// Maximum file size the editor will load (10 MB).
+    private static let maxFileSize: UInt64 = 10 * 1024 * 1024
 
     private(set) var workspaceId: UUID
     private var fileWatcher: FileWatcherHelper?
@@ -181,6 +187,18 @@ final class EditorPanel: Panel, ObservableObject {
     // MARK: - File I/O
 
     private func loadFileContent() {
+        // Size gate
+        if let attrs = try? FileManager.default.attributesOfItem(atPath: filePath),
+           let size = attrs[.size] as? UInt64,
+           size > Self.maxFileSize {
+            isFileTooLarge = true
+            isFileUnavailable = false
+            fileContent = ""
+            fileContentGeneration += 1
+            return
+        }
+        isFileTooLarge = false
+
         do {
             let content = try String(contentsOfFile: filePath, encoding: .utf8)
             lineEnding = content.contains("\r\n") ? .crlf : .lf
