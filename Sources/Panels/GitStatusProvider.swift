@@ -27,7 +27,7 @@ actor GitStatusProvider {
             return cachedStatuses
         }
 
-        let statuses = await withCheckedContinuation { continuation in
+        let statuses: [String: GitFileStatus] = await withCheckedContinuation { continuation in
             queue.async { [rootPath] in
                 let result = Self.runGit(
                     args: ["status", "--porcelain=v1", "-z", "--ignored"],
