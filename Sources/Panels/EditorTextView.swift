@@ -253,21 +253,31 @@ struct EditorTextView: NSViewRepresentable {
         func textStorage(
             _ textStorage: NSTextStorage,
             didProcessEditing editedMask: NSTextStorageEditActions,
-            range _: NSRange,
-            changeInLength _: Int
+            range editedRange: NSRange,
+            changeInLength delta: Int
         ) {
             guard editedMask.contains(.editedCharacters), !isUpdatingFromModel else { return }
             panel.markDirty()
-            scheduleHighlight()
+            scheduleHighlight(editedRange: editedRange)
         }
 
         // MARK: Debounced highlighting
 
-        func scheduleHighlight() {
+        func scheduleHighlight(editedRange: NSRange? = nil) {
             highlightWorkItem?.cancel()
             let item = DispatchWorkItem { [weak self] in
-                guard let self, let textView = self.textView, let ts = textView.textStorage else { return }
-                SyntaxHighlighter.highlight(ts, language: self.panel.language, font: EditorTextView.editorFont)
+                guard let self, let textView = self.textView,
+                      let ts = textView.textStorage else { return }
+                if let editedRange {
+                    SyntaxHighlighter.highlightRange(
+                        ts, editedRange: editedRange,
+                        language: self.panel.language,
+                        font: EditorTextView.editorFont)
+                } else {
+                    SyntaxHighlighter.highlight(
+                        ts, language: self.panel.language,
+                        font: EditorTextView.editorFont)
+                }
             }
             highlightWorkItem = item
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.2, execute: item)

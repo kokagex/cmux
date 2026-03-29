@@ -102,4 +102,48 @@ enum SyntaxHighlighter {
         }
         textStorage.endEditing()
     }
+
+    /// Highlight only the given line range (with context padding).
+    static func highlightRange(
+        _ textStorage: NSTextStorage,
+        editedRange: NSRange,
+        language: EditorLanguage,
+        font: NSFont
+    ) {
+        let text = textStorage.string
+        let nsText = text as NSString
+        guard textStorage.length > 0 else { return }
+
+        // Expand to full lines + 2 lines context each side
+        let clampedLocation = min(editedRange.location, max(nsText.length - 1, 0))
+        let lineStart = nsText.lineRange(for: NSRange(location: clampedLocation, length: 0)).location
+        let editEnd = min(NSMaxRange(editedRange), nsText.length)
+        let lineEnd = NSMaxRange(nsText.lineRange(for: NSRange(location: max(editEnd - 1, 0), length: 0)))
+
+        // Expand by 2 lines in each direction for multi-line constructs
+        var start = lineStart
+        for _ in 0..<2 {
+            if start == 0 { break }
+            start = nsText.lineRange(for: NSRange(location: start - 1, length: 0)).location
+        }
+        var end = lineEnd
+        for _ in 0..<2 {
+            if end >= nsText.length { break }
+            end = NSMaxRange(nsText.lineRange(for: NSRange(location: end, length: 0)))
+        }
+        let range = NSRange(location: start, length: end - start)
+
+        textStorage.beginEditing()
+        textStorage.setAttributes(
+            [.foregroundColor: NSColor.labelColor, .font: font], range: range)
+        let patternList = Self.patterns(for: language)
+        for pattern in patternList {
+            pattern.regex.enumerateMatches(in: text, range: range) { match, _, _ in
+                guard let matchRange = match?.range else { return }
+                textStorage.addAttribute(
+                    .foregroundColor, value: pattern.type.color, range: matchRange)
+            }
+        }
+        textStorage.endEditing()
+    }
 }
