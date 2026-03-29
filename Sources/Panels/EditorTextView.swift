@@ -12,9 +12,14 @@ final class LineNumberRulerView: NSRulerView {
     private weak var textView: NSTextView?
 
     private static let gutterFont = NSFont.monospacedSystemFont(ofSize: 11, weight: .regular)
+    private static let gutterFontBold = NSFont.monospacedSystemFont(ofSize: 11, weight: .medium)
     private static let textAttributes: [NSAttributedString.Key: Any] = [
         .font: gutterFont,
         .foregroundColor: NSColor.secondaryLabelColor,
+    ]
+    private static let currentLineAttributes: [NSAttributedString.Key: Any] = [
+        .font: gutterFontBold,
+        .foregroundColor: NSColor.labelColor,
     ]
     private static let minGutterWidth: CGFloat = 36
     private static let rightPadding: CGFloat = 8
@@ -94,17 +99,19 @@ final class LineNumberRulerView: NSRulerView {
             let lineRange = nsContent.lineRange(for: NSRange(location: charIndex, length: 0))
             let glyphRange = layoutManager.glyphRange(forCharacterRange: lineRange, actualCharacterRange: nil)
             var lineRect = layoutManager.lineFragmentRect(forGlyphAt: glyphRange.location, effectiveRange: nil)
-            lineRect.origin.y += textView.textContainerInset.height
+            lineRect.origin.y += textView.textContainerOrigin.y
 
             let yInRuler = lineRect.origin.y - visibleRect.origin.y
 
+            let isCurrent = (textView as? EditorNSTextView)?.currentLineNumber == lineNumber
+            let attrs = isCurrent ? Self.currentLineAttributes : Self.textAttributes
             let numberString = "\(lineNumber)" as NSString
-            let stringSize = numberString.size(withAttributes: Self.textAttributes)
+            let stringSize = numberString.size(withAttributes: attrs)
             let drawPoint = NSPoint(
                 x: ruleThickness - stringSize.width - Self.rightPadding,
                 y: yInRuler + (lineRect.height - stringSize.height) / 2
             )
-            numberString.draw(at: drawPoint, withAttributes: Self.textAttributes)
+            numberString.draw(at: drawPoint, withAttributes: attrs)
 
             lineNumber += 1
             charIndex = NSMaxRange(lineRange)
@@ -112,7 +119,7 @@ final class LineNumberRulerView: NSRulerView {
     }
 
     /// Fast newline count using UTF-16 scan up to the given UTF-16 offset.
-    private static func countNewlines(in string: String, upTo utf16Limit: Int) -> Int {
+    static func countNewlines(in string: String, upTo utf16Limit: Int) -> Int {
         var count = 0
         var offset = 0
         for char in string {
@@ -133,6 +140,9 @@ final class EditorNSTextView: NSTextView {
     var onBecomeFirstResponder: (() -> Void)?
     weak var lineNumberRuler: LineNumberRulerView?
 
+    /// 1-based line number where the cursor sits; 0 = unknown.
+    private(set) var currentLineNumber: Int = 0
+
     override func becomeFirstResponder() -> Bool {
         let result = super.becomeFirstResponder()
         if result { onBecomeFirstResponder?() }
@@ -151,6 +161,55 @@ final class EditorNSTextView: NSTextView {
 
     override var frame: NSRect {
         didSet { lineNumberRuler?.needsDisplay = true }
+    }
+
+    // VS Code style overscroll: last line can reach the top of the viewport.
+    override var textContainerOrigin: NSPoint {
+        NSPoint(x: textContainerInset.width, y: 4)
+    }
+
+    override func layout() {
+        super.layout()
+        guard let sv = enclosingScrollView else { return }
+        let h = max(sv.contentView.bounds.height - (font?.boundingRectForFont.height ?? 16), 0)
+        if abs(textContainerInset.height - h) > 1 { textContainerInset.height = h }
+    }
+
+    // MARK: - Cursor line highlight
+
+    override func setSelectedRanges(_ ranges: [NSValue], affinity: NSSelectionAffinity, stillSelecting: Bool) {
+        let oldLine = currentLineNumber
+        super.setSelectedRanges(ranges, affinity: affinity, stillSelecting: stillSelecting)
+        updateCurrentLine()
+        if currentLineNumber != oldLine {
+            needsDisplay = true
+            lineNumberRuler?.needsDisplay = true
+        }
+    }
+
+    override func drawBackground(in rect: NSRect) {
+        super.drawBackground(in: rect)
+        guard let lm = layoutManager, let tc = textContainer,
+              currentLineNumber > 0,
+              let range = selectedRanges.first?.rangeValue,
+              range.length == 0 else { return }
+        let glyphRange = lm.glyphRange(forCharacterRange:
+            (string as NSString).lineRange(for: NSRange(location: range.location, length: 0)),
+            actualCharacterRange: nil)
+        var lineRect = lm.lineFragmentRect(forGlyphAt: glyphRange.location, effectiveRange: nil)
+        lineRect.origin.x = 0
+        lineRect.origin.y += textContainerOrigin.y
+        lineRect.size.width = bounds.width
+        guard lineRect.intersects(rect) else { return }
+        NSColor.labelColor.withAlphaComponent(0.06).setFill()
+        lineRect.fill()
+    }
+
+    private func updateCurrentLine() {
+        guard let range = selectedRanges.first?.rangeValue else {
+            currentLineNumber = 0; return
+        }
+        currentLineNumber = LineNumberRulerView.countNewlines(in: string, upTo: range.location) + 1
     }
 }
 
@@ -264,6 +323,7 @@ struct EditorTextView: NSViewRepresentable {
             height: CGFloat.greatestFiniteMagnitude
         )
         textView.textContainer?.widthTracksTextView = true
+        textView.textContainer?.lineFragmentPadding = 12
 
         textView.keyDownHandler = context.coordinator.handleKeyDown
         textView.onBecomeFirstResponder = onBecomeFirstResponder
@@ -279,7 +339,7 @@ struct EditorTextView: NSViewRepresentable {
         scrollView.verticalRulerView = ruler
         textView.lineNumberRuler = ruler
 
-        // Observe scroll/resize to update line numbers (store token for cleanup)
+        // Observe scroll to update line numbers
         context.coordinator.boundsObserver = NotificationCenter.default.addObserver(
             forName: NSView.boundsDidChangeNotification,
             object: scrollView.contentView,
