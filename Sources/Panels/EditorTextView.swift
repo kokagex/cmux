@@ -382,12 +382,19 @@ struct EditorTextView: NSViewRepresentable {
         scrollView.verticalRulerView = ruler
         textView.lineNumberRuler = ruler
 
-        // Observe scroll to update line numbers
+        // Observe scroll to update line numbers (throttled to 60 fps)
+        var lastRulerRedraw: CFTimeInterval = 0
         context.coordinator.boundsObserver = NotificationCenter.default.addObserver(
             forName: NSView.boundsDidChangeNotification,
             object: scrollView.contentView,
             queue: .main
-        ) { _ in ruler.needsDisplay = true }
+        ) { _ in
+            let now = CACurrentMediaTime()
+            if now - lastRulerRedraw > 1.0 / 60.0 {
+                lastRulerRedraw = now
+                ruler.needsDisplay = true
+            }
+        }
 
         // Set initial content
         context.coordinator.setIsUpdatingFromModel(true)
