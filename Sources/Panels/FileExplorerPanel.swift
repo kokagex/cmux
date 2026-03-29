@@ -78,7 +78,9 @@ final class FileExplorerPanel: Panel, ObservableObject {
     @Published private(set) var focusFlashToken: Int = 0
 
     /// Text used to filter the file list.
-    @Published var filterText: String = ""
+    @Published var filterText: String = "" {
+        didSet { reloadTree() }
+    }
 
     /// When true, rootPath follows the active terminal's CWD (resolved to git repo root).
     @Published var followsActiveTerminal: Bool = true
@@ -282,7 +284,13 @@ final class FileExplorerPanel: Panel, ObservableObject {
         let rootNode = FileNode(url: rootURL, name: (rootPath as NSString).lastPathComponent, isDirectory: true)
         rootNode.loadChildren(showHidden: showHiddenFiles, ignoredPaths: showIgnoredFiles ? [] : ignoredPaths)
 
-        let nodes = rootNode.children ?? []
+        var nodes = rootNode.children ?? []
+
+        // Apply filter
+        let filter = filterText.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        if !filter.isEmpty {
+            nodes = Self.filterNodes(nodes, matching: filter)
+        }
 
         // Build structural fingerprint: sorted paths of all loaded nodes.
         // If the structure hasn't changed, skip the expensive full reload.
@@ -329,6 +337,23 @@ final class FileExplorerPanel: Panel, ObservableObject {
                 }
             }
         }
+    }
+
+    /// Recursively filter nodes, keeping directories that contain matching descendants.
+    private static func filterNodes(_ nodes: [FileNode], matching filter: String) -> [FileNode] {
+        var result: [FileNode] = []
+        for node in nodes {
+            if node.name.lowercased().contains(filter) {
+                result.append(node)
+            } else if node.isDirectory, let children = node.children {
+                let filtered = filterNodes(children, matching: filter)
+                if !filtered.isEmpty {
+                    node.children = filtered
+                    result.append(node)
+                }
+            }
+        }
+        return result
     }
 
     /// Find the existing node in the current tree by URL path.
