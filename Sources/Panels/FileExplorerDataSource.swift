@@ -218,11 +218,11 @@ final class FileExplorerDataSource: NSObject, NSOutlineViewDataSource, NSOutline
     }
 
     @objc func contextRename(_ sender: Any?) {
-        #if DEBUG
+        #if DEBUG // debug:file-explorer
         dlog("[FileExplorer] contextRename: contextMenuNode=\(contextMenuNode?.name ?? "nil"), clickedRow=\(outlineView?.clickedRow ?? -999)")
         #endif
         guard let node = clickedNode(), let outlineView else {
-            #if DEBUG
+            #if DEBUG // debug:file-explorer
             dlog("[FileExplorer] contextRename: FAILED clickedNode=nil")
             #endif
             return
@@ -256,7 +256,7 @@ final class FileExplorerDataSource: NSObject, NSOutlineViewDataSource, NSOutline
         textField.drawsBackground = true
         textField.backgroundColor = .textBackgroundColor
 
-        #if DEBUG
+        #if DEBUG // debug:file-explorer
         dlog("[FileExplorer] contextRename: editing setup done, window=\(outlineView.window != nil)")
         #endif
 
@@ -265,7 +265,7 @@ final class FileExplorerDataSource: NSObject, NSOutlineViewDataSource, NSOutline
         // from the field editor.
         DispatchQueue.main.async {
             let became = outlineView.window?.makeFirstResponder(textField) ?? false
-            #if DEBUG
+            #if DEBUG // debug:file-explorer
             dlog("[FileExplorer] contextRename: makeFirstResponder=\(became), fieldEditor=\(textField.currentEditor() != nil)")
             #endif
 
@@ -336,16 +336,16 @@ final class FileExplorerDataSource: NSObject, NSOutlineViewDataSource, NSOutline
     }
 
     @objc func contextDelete(_ sender: Any?) {
-        #if DEBUG
+        #if DEBUG // debug:file-explorer
         dlog("[FileExplorer] contextDelete: contextMenuNode=\(contextMenuNode?.name ?? "nil")")
         #endif
         guard let node = clickedNode() else {
-            #if DEBUG
+            #if DEBUG // debug:file-explorer
             dlog("[FileExplorer] contextDelete: FAILED clickedNode=nil")
             #endif
             return
         }
-        #if DEBUG
+        #if DEBUG // debug:file-explorer
         dlog("[FileExplorer] contextDelete: trashing \(node.name)")
         #endif
         NSWorkspace.shared.recycle([node.url]) { [weak self] _, error in
@@ -383,7 +383,7 @@ final class FileExplorerDataSource: NSObject, NSOutlineViewDataSource, NSOutline
         guard let outlineView else { return }
         let row = outlineView.clickedRow
         contextMenuNode = row >= 0 ? outlineView.item(atRow: row) as? FileNode : nil
-        #if DEBUG
+        #if DEBUG // debug:file-explorer
         dlog("[FileExplorer] menuWillOpen: clickedRow=\(row), node=\(contextMenuNode?.name ?? "nil")")
         #endif
     }

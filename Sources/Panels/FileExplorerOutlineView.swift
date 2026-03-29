@@ -1,5 +1,6 @@
 import SwiftUI
 import AppKit
+import Bonsplit
 
 // MARK: - FileExplorerOutlineView
 
@@ -15,6 +16,7 @@ struct FileExplorerOutlineView: NSViewRepresentable {
     final class Coordinator {
         let dataSource: FileExplorerDataSource
         var lastRenderedGeneration: Int = -1
+        var lastRenderedGitGeneration: Int = -1
         /// Set to true during programmatic auto-expand to avoid recording as user action.
         var isAutoExpanding: Bool = false
 
@@ -116,39 +118,69 @@ struct FileExplorerOutlineView: NSViewRepresentable {
             }
         }
 
-        // Only reload when the tree data actually changed
+        // Full reload only when tree structure changed
         let currentGen = panel.treeGeneration
-        guard coordinator.lastRenderedGeneration != currentGen else { return }
-        // Don't reload while inline editing — the field editor would be destroyed.
-        guard !panel.isEditing else { return }
-        coordinator.lastRenderedGeneration = currentGen
+        let currentGitGen = panel.gitStatusGeneration
 
-        // Save state before reload
-        let expandedPaths = collectExpandedPaths(outlineView: outlineView)
-        let selectedPaths = collectSelectedPaths(outlineView: outlineView)
-        let scrollPosition = outlineView.enclosingScrollView?.contentView.bounds.origin
+        if coordinator.lastRenderedGeneration != currentGen {
+            // Don't reload while inline editing — the field editor would be destroyed.
+            guard !panel.isEditing else { return }
+            coordinator.lastRenderedGeneration = currentGen
+            coordinator.lastRenderedGitGeneration = currentGitGen
 
-        outlineView.reloadData()
+            #if DEBUG // debug:file-explorer
+            let reloadStart = CACurrentMediaTime()
+            #endif
+            // Save state before reload
+            let expandedPaths = collectExpandedPaths(outlineView: outlineView)
+            let selectedPaths = collectSelectedPaths(outlineView: outlineView)
+            let scrollPosition = outlineView.enclosingScrollView?.contentView.bounds.origin
 
-        // Restore expanded state by matching URL paths
-        restoreExpandedPaths(outlineView: outlineView, nodes: panel.rootNodes, expandedPaths: expandedPaths)
+            outlineView.reloadData()
 
-        // Auto-expand directories containing git-changed files
-        coordinator.isAutoExpanding = true
-        autoExpandGitPaths(
-            outlineView: outlineView,
-            nodes: panel.rootNodes,
-            autoExpandPaths: panel.gitAutoExpandPaths,
-            userCollapsedPaths: panel.userCollapsedPaths
-        )
-        coordinator.isAutoExpanding = false
+            // Restore expanded state by matching URL paths
+            restoreExpandedPaths(outlineView: outlineView, nodes: panel.rootNodes, expandedPaths: expandedPaths)
 
-        // Restore selection
-        restoreSelectedPaths(outlineView: outlineView, selectedPaths: selectedPaths)
+            // Auto-expand directories containing git-changed files
+            coordinator.isAutoExpanding = true
+            autoExpandGitPaths(
+                outlineView: outlineView,
+                nodes: panel.rootNodes,
+                autoExpandPaths: panel.gitAutoExpandPaths,
+                userCollapsedPaths: panel.userCollapsedPaths
+            )
+            coordinator.isAutoExpanding = false
 
-        // Restore scroll position
-        if let scrollPosition {
-            outlineView.enclosingScrollView?.contentView.scroll(to: scrollPosition)
+            // Restore selection
+            restoreSelectedPaths(outlineView: outlineView, selectedPaths: selectedPaths)
+
+            // Restore scroll position
+            if let scrollPosition {
+                outlineView.enclosingScrollView?.contentView.scroll(to: scrollPosition)
+            }
+            #if DEBUG // debug:file-explorer
+            let reloadEnd = CACurrentMediaTime()
+            dlog("[FileExplorer] updateNSView: RELOAD gen=\(currentGen) took=\(String(format: "%.1f", (reloadEnd - reloadStart) * 1000))ms rows=\(outlineView.numberOfRows)")
+            #endif
+            return
+        }
+
+        // Lightweight: only git statuses changed — reconfigure visible cells in-place
+        if coordinator.lastRenderedGitGeneration != currentGitGen {
+            coordinator.lastRenderedGitGeneration = currentGitGen
+            #if DEBUG // debug:file-explorer
+            let gitStart = CACurrentMediaTime()
+            #endif
+            for row in 0..<outlineView.numberOfRows {
+                guard let node = outlineView.item(atRow: row) as? FileNode,
+                      let cellView = outlineView.view(atColumn: 0, row: row, makeIfNecessary: false) as? FileExplorerCellView
+                else { continue }
+                cellView.configure(with: node)
+            }
+            #if DEBUG // debug:file-explorer
+            let gitEnd = CACurrentMediaTime()
+            dlog("[FileExplorer] updateNSView: GIT-ONLY gitGen=\(currentGitGen) took=\(String(format: "%.1f", (gitEnd - gitStart) * 1000))ms rows=\(outlineView.numberOfRows)")
+            #endif
         }
     }
 

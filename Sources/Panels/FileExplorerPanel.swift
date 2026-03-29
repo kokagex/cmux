@@ -1,6 +1,8 @@
 import Foundation
+import Bonsplit
 import Combine
 import CoreServices
+import QuartzCore
 
 // MARK: - FileExplorerOpenAction
 
@@ -117,6 +119,10 @@ final class FileExplorerPanel: Panel, ObservableObject {
     /// Generation counter incremented each time rootNodes changes.
     /// Used by the outline view to avoid unnecessary reloads.
     @Published private(set) var treeGeneration: Int = 0
+
+    /// Generation counter incremented when only git statuses change (no structural tree change).
+    /// The outline view uses this to reconfigure visible cells without a full reloadData.
+    @Published private(set) var gitStatusGeneration: Int = 0
 
     init(workspaceId: UUID, rootPath: String) {
         self.id = UUID()
@@ -256,21 +262,85 @@ final class FileExplorerPanel: Panel, ObservableObject {
 
     // MARK: - File tree
 
+    /// Structural fingerprint of the current tree — used to skip full reloads
+    /// when the file list hasn't actually changed (only file contents modified).
+    private var treeFingerprint: [String] = []
+
     /// Reloads the root-level nodes from the filesystem.
     func reloadTree() {
         if isEditing {
             reloadDeferredDuringEditing = true
             return
         }
+        #if DEBUG // debug:file-explorer
+        let start = CACurrentMediaTime()
+        #endif
         let rootURL = URL(fileURLWithPath: rootPath)
         let rootNode = FileNode(url: rootURL, name: (rootPath as NSString).lastPathComponent, isDirectory: true)
         rootNode.loadChildren(showHidden: showHiddenFiles, ignoredPaths: showIgnoredFiles ? [] : ignoredPaths)
 
         let nodes = rootNode.children ?? []
+
+        // Build structural fingerprint: sorted paths of all loaded nodes.
+        // If the structure hasn't changed, skip the expensive full reload.
+        let newFingerprint = buildFingerprint(nodes)
+        if newFingerprint == treeFingerprint {
+            #if DEBUG // debug:file-explorer
+            let end = CACurrentMediaTime()
+            dlog("[FileExplorer] reloadTree: SKIP (no structural change) took=\(String(format: "%.1f", (end - start) * 1000))ms")
+            #endif
+            return
+        }
+        treeFingerprint = newFingerprint
+
         rootNodes = nodes
         applyGitStatuses(gitStatuses, to: rootNodes)
         gitAutoExpandPaths = computeAutoExpandPaths(statuses: gitStatuses)
         treeGeneration += 1
+        #if DEBUG // debug:file-explorer
+        let end = CACurrentMediaTime()
+        dlog("[FileExplorer] reloadTree: RELOAD took=\(String(format: "%.1f", (end - start) * 1000))ms nodes=\(nodes.count) gen=\(treeGeneration)")
+        #endif
+    }
+
+    /// Builds a flat list of path strings from loaded nodes for structural comparison.
+    private func buildFingerprint(_ nodes: [FileNode]) -> [String] {
+        var paths: [String] = []
+        appendFingerprint(nodes, to: &paths)
+        return paths
+    }
+
+    private func appendFingerprint(_ nodes: [FileNode], to paths: inout [String]) {
+        for node in nodes {
+            paths.append(node.url.path)
+            // Include children of previously-expanded directories
+            // so changes inside them are detected.
+            if node.isDirectory, let existing = existingNode(for: node.url),
+               existing.isExpanded {
+                // Load children from disk so the fingerprint reflects current state
+                if node.children == nil {
+                    node.loadChildren(showHidden: showHiddenFiles, ignoredPaths: showIgnoredFiles ? [] : ignoredPaths)
+                }
+                if let children = node.children {
+                    appendFingerprint(children, to: &paths)
+                }
+            }
+        }
+    }
+
+    /// Find the existing node in the current tree by URL path.
+    private func existingNode(for url: URL) -> FileNode? {
+        return findNode(in: rootNodes, path: url.path)
+    }
+
+    private func findNode(in nodes: [FileNode], path: String) -> FileNode? {
+        for node in nodes {
+            if node.url.path == path { return node }
+            if node.isDirectory, let children = node.children {
+                if let found = findNode(in: children, path: path) { return found }
+            }
+        }
+        return nil
     }
 
     /// Reloads children for a specific node (e.g., when it is expanded).
@@ -401,7 +471,9 @@ final class FileExplorerPanel: Panel, ObservableObject {
         if isEditing {
             reloadDeferredDuringEditing = true
         } else {
-            treeGeneration += 1
+            // Only bump gitStatusGeneration — no structural tree change,
+            // so the outline view can reconfigure cells without full reloadData.
+            gitStatusGeneration += 1
         }
 
         // Throttle drain: if another request arrived while running, re-run once.
