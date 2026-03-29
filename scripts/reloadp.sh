@@ -4,7 +4,14 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
 DERIVED_DATA="${SCRIPT_DIR}/DerivedData"
 
-xcodebuild -project GhosttyTabs.xcodeproj -scheme cmux -configuration Release -destination 'platform=macOS' -derivedDataPath "$DERIVED_DATA" build
+XCODE_LOG="/tmp/cmux-release-build.log"
+xcodebuild -project GhosttyTabs.xcodeproj -scheme cmux -configuration Release -destination 'platform=macOS' -derivedDataPath "$DERIVED_DATA" build 2>&1 | tee "$XCODE_LOG" | grep -E '(warning:|error:|fatal:|BUILD FAILED|BUILD SUCCEEDED|\*\* BUILD)'
+XCODE_EXIT=${PIPESTATUS[0]}
+if [[ "$XCODE_EXIT" -ne 0 ]]; then
+  echo "Build failed (exit $XCODE_EXIT). Full log: $XCODE_LOG" >&2
+  exit "$XCODE_EXIT"
+fi
+echo "/tmp/cmux-release-build.log" > /tmp/cmux-last-release-log-path
 pkill -x cmux || true
 sleep 0.2
 APP_PATH="${DERIVED_DATA}/Build/Products/Release/cmux.app"
@@ -12,6 +19,8 @@ if [[ ! -d "${APP_PATH}" ]]; then
   echo "cmux.app not found at ${APP_PATH}" >&2
   exit 1
 fi
+# Ensure the bundle timestamp reflects the latest build so Finder shows it correctly.
+touch "$APP_PATH"
 
 echo "Release app:"
 echo "  ${APP_PATH}"

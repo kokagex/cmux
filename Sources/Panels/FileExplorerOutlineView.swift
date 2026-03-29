@@ -1,6 +1,5 @@
 import SwiftUI
 import AppKit
-import Bonsplit
 
 // MARK: - FileExplorerOutlineView
 
@@ -128,9 +127,6 @@ struct FileExplorerOutlineView: NSViewRepresentable {
             coordinator.lastRenderedGeneration = currentGen
             coordinator.lastRenderedGitGeneration = currentGitGen
 
-            #if DEBUG // debug:file-explorer
-            let reloadStart = CACurrentMediaTime()
-            #endif
             // Save state before reload
             let expandedPaths = collectExpandedPaths(outlineView: outlineView)
             let selectedPaths = collectSelectedPaths(outlineView: outlineView)
@@ -158,29 +154,18 @@ struct FileExplorerOutlineView: NSViewRepresentable {
             if let scrollPosition {
                 outlineView.enclosingScrollView?.contentView.scroll(to: scrollPosition)
             }
-            #if DEBUG // debug:file-explorer
-            let reloadEnd = CACurrentMediaTime()
-            dlog("[FileExplorer] updateNSView: RELOAD gen=\(currentGen) took=\(String(format: "%.1f", (reloadEnd - reloadStart) * 1000))ms rows=\(outlineView.numberOfRows)")
-            #endif
             return
         }
 
         // Lightweight: only git statuses changed — reconfigure visible cells in-place
         if coordinator.lastRenderedGitGeneration != currentGitGen {
             coordinator.lastRenderedGitGeneration = currentGitGen
-            #if DEBUG // debug:file-explorer
-            let gitStart = CACurrentMediaTime()
-            #endif
             for row in 0..<outlineView.numberOfRows {
                 guard let node = outlineView.item(atRow: row) as? FileNode,
                       let cellView = outlineView.view(atColumn: 0, row: row, makeIfNecessary: false) as? FileExplorerCellView
                 else { continue }
                 cellView.configure(with: node)
             }
-            #if DEBUG // debug:file-explorer
-            let gitEnd = CACurrentMediaTime()
-            dlog("[FileExplorer] updateNSView: GIT-ONLY gitGen=\(currentGitGen) took=\(String(format: "%.1f", (gitEnd - gitStart) * 1000))ms rows=\(outlineView.numberOfRows)")
-            #endif
         }
     }
 

@@ -1,5 +1,4 @@
 import AppKit
-import Bonsplit
 import UniformTypeIdentifiers
 
 // MARK: - FileExplorerDataSource
@@ -218,13 +217,7 @@ final class FileExplorerDataSource: NSObject, NSOutlineViewDataSource, NSOutline
     }
 
     @objc func contextRename(_ sender: Any?) {
-        #if DEBUG // debug:file-explorer
-        dlog("[FileExplorer] contextRename: contextMenuNode=\(contextMenuNode?.name ?? "nil"), clickedRow=\(outlineView?.clickedRow ?? -999)")
-        #endif
         guard let node = clickedNode(), let outlineView else {
-            #if DEBUG // debug:file-explorer
-            dlog("[FileExplorer] contextRename: FAILED clickedNode=nil")
-            #endif
             return
         }
         // Find row by URL path — the cached node may be a stale object if the
@@ -256,18 +249,11 @@ final class FileExplorerDataSource: NSObject, NSOutlineViewDataSource, NSOutline
         textField.drawsBackground = true
         textField.backgroundColor = .textBackgroundColor
 
-        #if DEBUG // debug:file-explorer
-        dlog("[FileExplorer] contextRename: editing setup done, window=\(outlineView.window != nil)")
-        #endif
-
         // Delay makeFirstResponder to the next run loop iteration so that
         // the context menu's tracking loop cleanup does not steal focus back
         // from the field editor.
         DispatchQueue.main.async {
-            let became = outlineView.window?.makeFirstResponder(textField) ?? false
-            #if DEBUG // debug:file-explorer
-            dlog("[FileExplorer] contextRename: makeFirstResponder=\(became), fieldEditor=\(textField.currentEditor() != nil)")
-            #endif
+            outlineView.window?.makeFirstResponder(textField)
 
             // Select the name without extension for files
             if !currentNode.isDirectory, let fieldEditor = textField.currentEditor() {
@@ -336,18 +322,9 @@ final class FileExplorerDataSource: NSObject, NSOutlineViewDataSource, NSOutline
     }
 
     @objc func contextDelete(_ sender: Any?) {
-        #if DEBUG // debug:file-explorer
-        dlog("[FileExplorer] contextDelete: contextMenuNode=\(contextMenuNode?.name ?? "nil")")
-        #endif
         guard let node = clickedNode() else {
-            #if DEBUG // debug:file-explorer
-            dlog("[FileExplorer] contextDelete: FAILED clickedNode=nil")
-            #endif
             return
         }
-        #if DEBUG // debug:file-explorer
-        dlog("[FileExplorer] contextDelete: trashing \(node.name)")
-        #endif
         NSWorkspace.shared.recycle([node.url]) { [weak self] _, error in
             guard error == nil else { return }
             DispatchQueue.main.async {
@@ -383,9 +360,6 @@ final class FileExplorerDataSource: NSObject, NSOutlineViewDataSource, NSOutline
         guard let outlineView else { return }
         let row = outlineView.clickedRow
         contextMenuNode = row >= 0 ? outlineView.item(atRow: row) as? FileNode : nil
-        #if DEBUG // debug:file-explorer
-        dlog("[FileExplorer] menuWillOpen: clickedRow=\(row), node=\(contextMenuNode?.name ?? "nil")")
-        #endif
     }
 
     func menuDidClose(_ menu: NSMenu) {

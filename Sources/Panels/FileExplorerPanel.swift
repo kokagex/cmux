@@ -1,8 +1,6 @@
 import Foundation
-import Bonsplit
 import Combine
 import CoreServices
-import QuartzCore
 
 // MARK: - FileExplorerOpenAction
 
@@ -272,9 +270,6 @@ final class FileExplorerPanel: Panel, ObservableObject {
             reloadDeferredDuringEditing = true
             return
         }
-        #if DEBUG // debug:file-explorer
-        let start = CACurrentMediaTime()
-        #endif
         let rootURL = URL(fileURLWithPath: rootPath)
         let rootNode = FileNode(url: rootURL, name: (rootPath as NSString).lastPathComponent, isDirectory: true)
         rootNode.loadChildren(showHidden: showHiddenFiles, ignoredPaths: showIgnoredFiles ? [] : ignoredPaths)
@@ -285,10 +280,6 @@ final class FileExplorerPanel: Panel, ObservableObject {
         // If the structure hasn't changed, skip the expensive full reload.
         let newFingerprint = buildFingerprint(nodes)
         if newFingerprint == treeFingerprint {
-            #if DEBUG // debug:file-explorer
-            let end = CACurrentMediaTime()
-            dlog("[FileExplorer] reloadTree: SKIP (no structural change) took=\(String(format: "%.1f", (end - start) * 1000))ms")
-            #endif
             return
         }
         treeFingerprint = newFingerprint
@@ -297,10 +288,6 @@ final class FileExplorerPanel: Panel, ObservableObject {
         applyGitStatuses(gitStatuses, to: rootNodes)
         gitAutoExpandPaths = computeAutoExpandPaths(statuses: gitStatuses)
         treeGeneration += 1
-        #if DEBUG // debug:file-explorer
-        let end = CACurrentMediaTime()
-        dlog("[FileExplorer] reloadTree: RELOAD took=\(String(format: "%.1f", (end - start) * 1000))ms nodes=\(nodes.count) gen=\(treeGeneration)")
-        #endif
     }
 
     /// Builds a flat list of path strings from loaded nodes for structural comparison.
