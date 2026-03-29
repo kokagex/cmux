@@ -1,10 +1,11 @@
 import AppKit
+import Bonsplit
 import UniformTypeIdentifiers
 
 // MARK: - FileExplorerDataSource
 
 @MainActor
-final class FileExplorerDataSource: NSObject, NSOutlineViewDataSource, NSOutlineViewDelegate, NSTextFieldDelegate {
+final class FileExplorerDataSource: NSObject, NSOutlineViewDataSource, NSOutlineViewDelegate, NSTextFieldDelegate, NSMenuItemValidation, NSMenuDelegate {
 
     weak var panel: FileExplorerPanel?
     weak var outlineView: NSOutlineView?
@@ -18,6 +19,10 @@ final class FileExplorerDataSource: NSObject, NSOutlineViewDataSource, NSOutline
 
     /// The node currently being renamed via inline editing, or nil.
     private var editingNode: FileNode?
+
+    /// Cached node from right-click, captured when context menu opens (clickedRow is
+    /// only valid at that point; it gets reset before the menu action fires).
+    private var contextMenuNode: FileNode?
 
     // MARK: - NSOutlineViewDataSource
 
@@ -213,29 +218,60 @@ final class FileExplorerDataSource: NSObject, NSOutlineViewDataSource, NSOutline
     }
 
     @objc func contextRename(_ sender: Any?) {
-        guard let node = clickedNode(), let outlineView else { return }
-        let row = outlineView.row(forItem: node)
+        #if DEBUG
+        dlog("[FileExplorer] contextRename: contextMenuNode=\(contextMenuNode?.name ?? "nil"), clickedRow=\(outlineView?.clickedRow ?? -999)")
+        #endif
+        guard let node = clickedNode(), let outlineView else {
+            #if DEBUG
+            dlog("[FileExplorer] contextRename: FAILED clickedNode=nil")
+            #endif
+            return
+        }
+        // Find row by URL path — the cached node may be a stale object if the
+        // tree reloaded between menuWillOpen and the action dispatch.
+        let targetPath = node.url.path
+        var row = outlineView.row(forItem: node)
+        if row < 0 {
+            for r in 0..<outlineView.numberOfRows {
+                if let n = outlineView.item(atRow: r) as? FileNode, n.url.path == targetPath {
+                    row = r
+                    break
+                }
+            }
+        }
         guard row >= 0,
               let cellView = outlineView.view(atColumn: 0, row: row, makeIfNecessary: false) as? FileExplorerCellView
         else { return }
+        // Use the current node object from the outline view for editingNode
+        let currentNode = outlineView.item(atRow: row) as? FileNode ?? node
 
-        editingNode = node
+        editingNode = currentNode
         panel?.isEditing = true
 
         let textField = cellView.nameLabel
         textField.isEditable = true
         textField.isSelectable = true
         textField.delegate = self
+        textField.focusRingType = .none
+        textField.drawsBackground = true
+        textField.backgroundColor = .textBackgroundColor
+
+        #if DEBUG
+        dlog("[FileExplorer] contextRename: editing setup done, window=\(outlineView.window != nil)")
+        #endif
 
         // Delay makeFirstResponder to the next run loop iteration so that
         // the context menu's tracking loop cleanup does not steal focus back
         // from the field editor.
         DispatchQueue.main.async {
-            outlineView.window?.makeFirstResponder(textField)
+            let became = outlineView.window?.makeFirstResponder(textField) ?? false
+            #if DEBUG
+            dlog("[FileExplorer] contextRename: makeFirstResponder=\(became), fieldEditor=\(textField.currentEditor() != nil)")
+            #endif
 
             // Select the name without extension for files
-            if !node.isDirectory, let fieldEditor = textField.currentEditor() {
-                let name = node.name
+            if !currentNode.isDirectory, let fieldEditor = textField.currentEditor() {
+                let name = currentNode.name
                 if let dotRange = name.range(of: ".", options: .backwards), dotRange.lowerBound != name.startIndex {
                     let prefixLength = name.distance(from: name.startIndex, to: dotRange.lowerBound)
                     fieldEditor.selectedRange = NSRange(location: 0, length: prefixLength)
@@ -256,6 +292,8 @@ final class FileExplorerDataSource: NSObject, NSOutlineViewDataSource, NSOutline
         textField.isEditable = false
         textField.isSelectable = false
         textField.delegate = nil
+        textField.drawsBackground = false
+        textField.backgroundColor = .clear
         editingNode = nil
 
         // Validate and perform rename
@@ -286,6 +324,8 @@ final class FileExplorerDataSource: NSObject, NSOutlineViewDataSource, NSOutline
                 textField.isEditable = false
                 textField.isSelectable = false
                 textField.delegate = nil
+                textField.drawsBackground = false
+                textField.backgroundColor = .clear
             }
             editingNode = nil
             panel?.endEditing()
@@ -296,8 +336,34 @@ final class FileExplorerDataSource: NSObject, NSOutlineViewDataSource, NSOutline
     }
 
     @objc func contextDelete(_ sender: Any?) {
-        guard let node = clickedNode() else { return }
-        NSWorkspace.shared.recycle([node.url]) { _, _ in }
+        #if DEBUG
+        dlog("[FileExplorer] contextDelete: contextMenuNode=\(contextMenuNode?.name ?? "nil")")
+        #endif
+        guard let node = clickedNode() else {
+            #if DEBUG
+            dlog("[FileExplorer] contextDelete: FAILED clickedNode=nil")
+            #endif
+            return
+        }
+        #if DEBUG
+        dlog("[FileExplorer] contextDelete: trashing \(node.name)")
+        #endif
+        NSWorkspace.shared.recycle([node.url]) { [weak self] _, error in
+            guard error == nil else { return }
+            DispatchQueue.main.async {
+                self?.panel?.reloadTree()
+            }
+        }
+    }
+
+    // MARK: - NSMenuItemValidation
+
+    @objc func validateMenuItem(_ menuItem: NSMenuItem) -> Bool {
+        let action = menuItem.action
+        if action == #selector(contextNewFile(_:)) || action == #selector(contextNewFolder(_:)) {
+            return true
+        }
+        return clickedNode() != nil
     }
 
     @objc func contextShowInFinder(_ sender: Any?) {
@@ -311,9 +377,30 @@ final class FileExplorerDataSource: NSObject, NSOutlineViewDataSource, NSOutline
         NSPasteboard.general.setString(node.url.path, forType: .string)
     }
 
+    // MARK: - NSMenuDelegate
+
+    func menuWillOpen(_ menu: NSMenu) {
+        guard let outlineView else { return }
+        let row = outlineView.clickedRow
+        contextMenuNode = row >= 0 ? outlineView.item(atRow: row) as? FileNode : nil
+        #if DEBUG
+        dlog("[FileExplorer] menuWillOpen: clickedRow=\(row), node=\(contextMenuNode?.name ?? "nil")")
+        #endif
+    }
+
+    func menuDidClose(_ menu: NSMenu) {
+        // Defer clearing so the action method can still read the cached node.
+        // Actions are dispatched after menuDidClose on the same run-loop pass.
+        DispatchQueue.main.async { [weak self] in
+            self?.contextMenuNode = nil
+        }
+    }
+
     // MARK: - Helpers
 
     private func clickedNode() -> FileNode? {
+        // Prefer the cached node (captured when the menu opened, before clickedRow resets)
+        if let contextMenuNode { return contextMenuNode }
         guard let outlineView else { return nil }
         let row = outlineView.clickedRow
         guard row >= 0 else { return nil }
@@ -328,6 +415,7 @@ final class FileExplorerCellView: NSView {
     let iconView: NSImageView
     let nameLabel: NSTextField
     let statusLabel: NSTextField
+    private var statusWidthConstraint: NSLayoutConstraint!
 
     // MARK: - Init
 
@@ -357,14 +445,16 @@ final class FileExplorerCellView: NSView {
         nameLabel.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
 
         statusLabel.translatesAutoresizingMaskIntoConstraints = false
-        statusLabel.font = .systemFont(ofSize: 10)
-        statusLabel.alignment = .right
+        statusLabel.font = .monospacedSystemFont(ofSize: 10, weight: .medium)
+        statusLabel.alignment = .center
         statusLabel.setContentCompressionResistancePriority(.required, for: .horizontal)
         statusLabel.setContentHuggingPriority(.required, for: .horizontal)
 
         addSubview(iconView)
-        addSubview(nameLabel)
         addSubview(statusLabel)
+        addSubview(nameLabel)
+
+        statusWidthConstraint = statusLabel.widthAnchor.constraint(equalToConstant: 0)
 
         NSLayoutConstraint.activate([
             // Icon: 16x16, vertically centered
@@ -373,14 +463,14 @@ final class FileExplorerCellView: NSView {
             iconView.widthAnchor.constraint(equalToConstant: 16),
             iconView.heightAnchor.constraint(equalToConstant: 16),
 
-            // Status badge: fixed 16pt wide, right side, vertically centered
-            statusLabel.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -4),
+            // Status badge: left side, between icon and name
+            statusLabel.leadingAnchor.constraint(equalTo: iconView.trailingAnchor, constant: 2),
             statusLabel.centerYAnchor.constraint(equalTo: centerYAnchor),
-            statusLabel.widthAnchor.constraint(equalToConstant: 16),
+            statusWidthConstraint,
 
-            // Name label: fills space between icon and status
-            nameLabel.leadingAnchor.constraint(equalTo: iconView.trailingAnchor, constant: 4),
-            nameLabel.trailingAnchor.constraint(equalTo: statusLabel.leadingAnchor, constant: -2),
+            // Name label: fills remaining space
+            nameLabel.leadingAnchor.constraint(equalTo: statusLabel.trailingAnchor, constant: 2),
+            nameLabel.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -4),
             nameLabel.centerYAnchor.constraint(equalTo: centerYAnchor),
         ])
     }
@@ -388,6 +478,13 @@ final class FileExplorerCellView: NSView {
     // MARK: - Configure
 
     func configure(with node: FileNode) {
+        // Reset editing state (cell may be reused from an editing session)
+        nameLabel.isEditable = false
+        nameLabel.isSelectable = false
+        nameLabel.delegate = nil
+        nameLabel.drawsBackground = false
+        nameLabel.backgroundColor = .clear
+
         // Icon
         let symbolName = FileIconMapper.icon(for: node.name, isDirectory: node.isDirectory)
         let image = NSImage(systemSymbolName: symbolName, accessibilityDescription: nil)
@@ -405,11 +502,17 @@ final class FileExplorerCellView: NSView {
         nameLabel.stringValue = node.name
         nameLabel.textColor = color
 
-        // Status badge
+        // Status badge (left side)
         let badge = statusBadge(for: node.gitStatus)
         statusLabel.stringValue = badge
         statusLabel.textColor = color
-        statusLabel.isHidden = badge.isEmpty
+        if badge.isEmpty {
+            statusLabel.isHidden = true
+            statusWidthConstraint.constant = 0
+        } else {
+            statusLabel.isHidden = false
+            statusWidthConstraint.constant = 14
+        }
     }
 
     private func textColor(for status: GitFileStatus) -> NSColor {

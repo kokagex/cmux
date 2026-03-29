@@ -50,6 +50,13 @@ struct FileExplorerOutlineView: NSViewRepresentable {
         scrollView.autohidesScrollers = true
         scrollView.drawsBackground = true
 
+        // Force an opaque backing layer so the sourceList vibrancy effect
+        // does not bleed through when the window itself is non-opaque
+        // (Ghostty transparent background).
+        scrollView.wantsLayer = true
+        scrollView.layer?.isOpaque = true
+        scrollView.layer?.backgroundColor = NSColor.controlBackgroundColor.cgColor
+
         // Outline view
         let outlineView = NSOutlineView()
         outlineView.headerView = nil
@@ -57,6 +64,7 @@ struct FileExplorerOutlineView: NSViewRepresentable {
         outlineView.rowHeight = 22
         outlineView.style = .sourceList
         outlineView.selectionHighlightStyle = .sourceList
+        outlineView.backgroundColor = .controlBackgroundColor
 
         // Single column — auto-resize to fill width
         let column = NSTableColumn(identifier: NSUserInterfaceItemIdentifier("FileColumn"))
@@ -81,7 +89,9 @@ struct FileExplorerOutlineView: NSViewRepresentable {
         outlineView.setDraggingSourceOperationMask(.move, forLocal: true)
 
         // Context menu
-        outlineView.menu = buildContextMenu(coordinator: ds)
+        let contextMenu = buildContextMenu(coordinator: ds)
+        contextMenu.delegate = ds
+        outlineView.menu = contextMenu
 
         // Store reference so context menu actions can find the outline view
         ds.outlineView = outlineView
@@ -109,6 +119,8 @@ struct FileExplorerOutlineView: NSViewRepresentable {
         // Only reload when the tree data actually changed
         let currentGen = panel.treeGeneration
         guard coordinator.lastRenderedGeneration != currentGen else { return }
+        // Don't reload while inline editing — the field editor would be destroyed.
+        guard !panel.isEditing else { return }
         coordinator.lastRenderedGeneration = currentGen
 
         // Save state before reload

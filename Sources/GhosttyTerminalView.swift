@@ -8925,6 +8925,13 @@ final class GhosttySurfaceScrollView: NSView {
 #endif
             return
         }
+        // Don't steal focus from an active field editor (e.g., file explorer inline rename).
+        if let fr = window.firstResponder as? NSTextView, fr.isFieldEditor {
+#if DEBUG
+            dlog("find.applyFirstResponder SKIP surface=\(surfaceShort) reason=fieldEditorActive")
+#endif
+            return
+        }
 #if DEBUG
         dlog("find.applyFirstResponder APPLY surface=\(surfaceShort) prevFirstResponder=\(String(describing: window.firstResponder))")
 #endif
