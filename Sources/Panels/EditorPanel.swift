@@ -64,6 +64,14 @@ final class EditorPanel: Panel, ObservableObject {
     /// so the view knows to update NSTextView.
     @Published private(set) var fileContentGeneration: Int = 0
 
+    /// Detected line ending style of the file (LF or CRLF).
+    enum LineEnding: String {
+        case lf = "LF"
+        case crlf = "CRLF"
+    }
+
+    @Published private(set) var lineEnding: LineEnding = .lf
+
     /// Weak reference to the backing NSTextView for programmatic focus.
     weak var focusableTextView: EditorNSTextView?
 
@@ -111,8 +119,11 @@ final class EditorPanel: Panel, ObservableObject {
     /// Save text to disk. Called by the view with current NSTextView content.
     func save(text: String) {
         guard isDirty else { return }
+        let output = lineEnding == .crlf
+            ? text.replacingOccurrences(of: "\n", with: "\r\n")
+            : text
         do {
-            try text.write(toFile: filePath, atomically: true, encoding: .utf8)
+            try output.write(toFile: filePath, atomically: true, encoding: .utf8)
             isDirty = false
         } catch {
             // Save failed -- isDirty stays true.
@@ -157,14 +168,16 @@ final class EditorPanel: Panel, ObservableObject {
     private func loadFileContent() {
         do {
             let content = try String(contentsOfFile: filePath, encoding: .utf8)
-            fileContent = content
+            lineEnding = content.contains("\r\n") ? .crlf : .lf
+            fileContent = content.replacingOccurrences(of: "\r\n", with: "\n")
             isFileUnavailable = false
         } catch {
             // Fallback: try ISO Latin-1, which accepts all 256 byte values,
             // covering legacy encodings like Windows-1252.
             if let data = FileManager.default.contents(atPath: filePath),
                let decoded = String(data: data, encoding: .isoLatin1) {
-                fileContent = decoded
+                lineEnding = decoded.contains("\r\n") ? .crlf : .lf
+                fileContent = decoded.replacingOccurrences(of: "\r\n", with: "\n")
                 isFileUnavailable = false
             } else {
                 isFileUnavailable = true
