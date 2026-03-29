@@ -50,6 +50,9 @@ final class EditorPanel: Panel, ObservableObject {
     /// SF Symbol icon for the tab bar.
     var displayIcon: String? { "doc.text" }
 
+    /// Set when the file changes on disk while the editor has unsaved changes.
+    @Published private(set) var hasExternalConflict: Bool = false
+
     /// Whether the file has been deleted or is unreadable.
     @Published private(set) var isFileUnavailable: Bool = false
 
@@ -137,6 +140,18 @@ final class EditorPanel: Panel, ObservableObject {
         if isPreview { promoteToFixed() }
     }
 
+    /// Discard local changes and reload from disk.
+    func reloadFromDisk() {
+        isDirty = false
+        hasExternalConflict = false
+        loadFileContent()
+    }
+
+    /// Keep local changes, dismiss the conflict banner.
+    func keepLocalChanges() {
+        hasExternalConflict = false
+    }
+
     /// Promote from preview tab to fixed tab.
     func promoteToFixed() {
         guard isPreview else { return }
@@ -194,13 +209,17 @@ final class EditorPanel: Panel, ObservableObject {
                 guard let self else { return }
                 switch changeKind {
                 case .contentChanged:
-                    if !self.isDirty { self.loadFileContent() }
-                case .deletedOrRenamed:
-                    if !self.isDirty {
+                    if self.isDirty {
+                        self.hasExternalConflict = true
+                    } else {
                         self.loadFileContent()
                     }
-                    // Reattach to the new inode. If the file is not yet
-                    // available, reattach() starts the retry loop.
+                case .deletedOrRenamed:
+                    if self.isDirty {
+                        self.hasExternalConflict = true
+                    } else {
+                        self.loadFileContent()
+                    }
                     self.fileWatcher?.reattach()
                 }
             },

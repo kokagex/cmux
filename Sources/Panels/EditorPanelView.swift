@@ -17,6 +17,32 @@ struct EditorPanelView: View {
             VStack(spacing: 0) {
                 toolbar
                 Divider()
+                if panel.hasExternalConflict {
+                    HStack(spacing: 8) {
+                        Image(systemName: "exclamationmark.triangle.fill")
+                            .foregroundColor(.orange)
+                        Text(String(localized: "editorPanel.conflict.message",
+                                    defaultValue: "File changed on disk"))
+                            .font(.system(size: 12))
+                        Spacer()
+                        Button(String(localized: "editorPanel.conflict.reload",
+                                      defaultValue: "Reload")) {
+                            panel.reloadFromDisk()
+                        }
+                        .buttonStyle(.borderless)
+                        .font(.system(size: 12, weight: .medium))
+                        Button(String(localized: "editorPanel.conflict.keep",
+                                      defaultValue: "Keep mine")) {
+                            panel.keepLocalChanges()
+                        }
+                        .buttonStyle(.borderless)
+                        .font(.system(size: 12))
+                    }
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 6)
+                    .background(Color.orange.opacity(0.1))
+                    Divider()
+                }
                 if panel.isFileUnavailable {
                     fileUnavailableView
                 } else {
