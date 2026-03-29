@@ -167,6 +167,7 @@ final class EditorNSTextView: NSTextView {
     var keyDownHandler: ((NSEvent) -> Bool)?
     var onBecomeFirstResponder: (() -> Void)?
     weak var lineNumberRuler: LineNumberRulerView?
+    private var undoCoalesceTimer: DispatchWorkItem?
 
     /// 1-based line number where the cursor sits; 0 = unknown.
     private(set) var currentLineNumber: Int = 0
@@ -185,6 +186,19 @@ final class EditorNSTextView: NSTextView {
     override func didChangeText() {
         super.didChangeText()
         lineNumberRuler?.invalidateLineCount()
+
+        // Group rapid keystrokes into one undo step.
+        // Close the current undo group after 500ms of inactivity.
+        undoCoalesceTimer?.cancel()
+        if undoManager?.groupingLevel == 0 {
+            undoManager?.beginUndoGrouping()
+        }
+        let item = DispatchWorkItem { [weak self] in
+            guard let self, let um = self.undoManager, um.groupingLevel > 0 else { return }
+            um.endUndoGrouping()
+        }
+        undoCoalesceTimer = item
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5, execute: item)
     }
 
     override var frame: NSRect {
@@ -348,6 +362,17 @@ struct EditorTextView: NSViewRepresentable {
         textView.usesFindBar = true
         textView.isRichText = false
         textView.font = Self.editorFont
+        textView.typingAttributes[.ligature] = 0
+
+        // Set tab width to 4 spaces
+        let charWidth = Self.editorFont.advancement(forGlyph: Self.editorFont.glyph(withName: "space")).width
+        let tabInterval = charWidth * 4
+        let tabStyle = NSMutableParagraphStyle()
+        tabStyle.defaultTabInterval = tabInterval
+        tabStyle.tabStops = []
+        textView.defaultParagraphStyle = tabStyle
+        textView.typingAttributes[.paragraphStyle] = tabStyle
+
         textView.textColor = .labelColor
         textView.backgroundColor = .clear
         textView.drawsBackground = false

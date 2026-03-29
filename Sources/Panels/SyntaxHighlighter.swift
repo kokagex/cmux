@@ -93,7 +93,11 @@ enum SyntaxHighlighter {
 
         textStorage.beginEditing()
         // Reset to defaults
-        textStorage.setAttributes([.foregroundColor: NSColor.labelColor, .font: font], range: fullRange)
+        textStorage.setAttributes([
+            .foregroundColor: NSColor.labelColor,
+            .font: font,
+            .ligature: 0
+        ], range: fullRange)
         // Apply patterns
         let patternList = Self.patterns(for: language)
         for pattern in patternList {
@@ -140,8 +144,11 @@ enum SyntaxHighlighter {
         let range = NSRange(location: start, length: end - start)
 
         textStorage.beginEditing()
-        textStorage.setAttributes(
-            [.foregroundColor: NSColor.labelColor, .font: font], range: range)
+        textStorage.setAttributes([
+            .foregroundColor: NSColor.labelColor,
+            .font: font,
+            .ligature: 0
+        ], range: range)
         let patternList = Self.patterns(for: language)
         for pattern in patternList {
             var matchCount = 0
