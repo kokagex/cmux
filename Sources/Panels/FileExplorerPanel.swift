@@ -288,12 +288,20 @@ final class FileExplorerPanel: Panel, ObservableObject {
         // If the structure hasn't changed, skip the expensive full reload.
         let newFingerprint = buildFingerprint(nodes)
         if newFingerprint == treeFingerprint {
+            // Structure unchanged — refresh git statuses on existing nodes
+            if !gitStatuses.isEmpty {
+                applyGitStatuses(gitStatuses, to: rootNodes)
+                gitAutoExpandPaths = computeAutoExpandPaths(statuses: gitStatuses)
+                gitStatusGeneration += 1
+            }
             return
         }
         treeFingerprint = newFingerprint
 
         rootNodes = nodes
-        applyGitStatuses(gitStatuses, to: rootNodes)
+        if !gitStatuses.isEmpty {
+            applyGitStatuses(gitStatuses, to: rootNodes)
+        }
         gitAutoExpandPaths = computeAutoExpandPaths(statuses: gitStatuses)
         treeGeneration += 1
     }
@@ -338,10 +346,13 @@ final class FileExplorerPanel: Panel, ObservableObject {
         return nil
     }
 
-    /// Reloads children for a specific node (e.g., when it is expanded).
+    /// Loads children for a node on first expand. Skips if already loaded —
+    /// FSEvents triggers full reloadTree() when directory contents change on disk.
     func refreshExpandedNode(_ node: FileNode) {
-        node.loadChildren(showHidden: showHiddenFiles, ignoredPaths: showIgnoredFiles ? [] : ignoredPaths)
-        applyGitStatuses(gitStatuses, to: node.children ?? [])
+        if node.children == nil {
+            node.loadChildren(showHidden: showHiddenFiles, ignoredPaths: showIgnoredFiles ? [] : ignoredPaths)
+            applyGitStatuses(gitStatuses, to: node.children ?? [])
+        }
     }
 
     /// Applies a git status dictionary to nodes, recursing into expanded children.
