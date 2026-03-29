@@ -10,6 +10,14 @@ enum FileExplorerOpenAction: String, Codable, Sendable {
     case system
 }
 
+// MARK: - Weak (FSEventStream callback helper)
+
+/// Weak wrapper for FSEventStream C callback context.
+private final class Weak<T: AnyObject> {
+    weak var value: T?
+    init(_ value: T) { self.value = value }
+}
+
 // MARK: - FileExplorerPanel
 
 /// A panel that displays a file explorer tree for a given directory.
@@ -504,28 +512,28 @@ final class FileExplorerPanel: Panel, ObservableObject {
         guard eventStream == nil else { return }
 
         let pathsToWatch = [rootPath] as CFArray
-        let latency: CFTimeInterval = 0.3 // 300 ms coalesce window (JetBrains-level)
+        let latency: CFTimeInterval = 0.3
 
-        // Use Unmanaged to bridge self as a raw pointer into the C callback.
-        let selfPtr = Unmanaged.passRetained(self).toOpaque()
+        // Use a weak wrapper instead of retaining self directly.
+        let weak = Weak(self)
+        let ref = Unmanaged.passRetained(weak).toOpaque()
 
         var context = FSEventStreamContext(
             version: 0,
-            info: selfPtr,
+            info: ref,
             retain: nil,
             release: { ptr in
-                // Release the retained reference when the stream is invalidated.
-                if let ptr { Unmanaged<FileExplorerPanel>.fromOpaque(ptr).release() }
+                if let ptr { Unmanaged<Weak<FileExplorerPanel>>.fromOpaque(ptr).release() }
             },
             copyDescription: nil
         )
 
         let callback: FSEventStreamCallback = { _, info, _, _, _, _ in
             guard let info else { return }
-            let panel = Unmanaged<FileExplorerPanel>.fromOpaque(info).takeUnretainedValue()
-            // Dispatch onto main actor — handleFSEvents is @MainActor.
-            DispatchQueue.main.async {
-                panel.handleFSEvents()
+            let weak = Unmanaged<Weak<FileExplorerPanel>>.fromOpaque(info).takeUnretainedValue()
+            guard let panel = weak.value else { return }
+            DispatchQueue.main.async { [weak panel] in
+                panel?.handleFSEvents()
             }
         }
 
