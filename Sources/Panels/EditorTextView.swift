@@ -24,6 +24,8 @@ final class LineNumberRulerView: NSRulerView {
     private static let minGutterWidth: CGFloat = 36
     private static let rightPadding: CGFloat = 8
 
+    /// Cached array of UTF-16 offsets where each line starts. Index 0 = line 1 start (always 0).
+    private var lineStartOffsets: [Int] = [0]
     /// Cached total line count; invalidated on text change.
     private var cachedTotalLines: Int = 1
     private var cachedTextGeneration: Int = -1
@@ -49,6 +51,7 @@ final class LineNumberRulerView: NSRulerView {
     /// Called by EditorNSTextView when text content changes.
     func invalidateLineCount() {
         cachedTextGeneration = -1
+        lineStartOffsets = [0]
         needsDisplay = true
     }
 
@@ -71,8 +74,9 @@ final class LineNumberRulerView: NSRulerView {
         let content = textView.string
         let textGen = content.hashValue
         if textGen != cachedTextGeneration {
-            cachedTotalLines = Self.countNewlines(in: content, upTo: content.utf16.count) + 1
             cachedTextGeneration = textGen
+            lineStartOffsets = Self.buildLineStartOffsets(content)
+            cachedTotalLines = lineStartOffsets.count
         }
 
         let digitCount = max(String(cachedTotalLines).count, 2)
@@ -92,7 +96,7 @@ final class LineNumberRulerView: NSRulerView {
 
         // Line number at the start of the visible range
         let nsContent = content as NSString
-        var lineNumber = Self.countNewlines(in: content, upTo: visibleCharRange.location) + 1
+        var lineNumber = lineNumberForUTF16Offset(visibleCharRange.location)
         var charIndex = visibleCharRange.location
 
         while charIndex < NSMaxRange(visibleCharRange) {
@@ -116,6 +120,30 @@ final class LineNumberRulerView: NSRulerView {
             lineNumber += 1
             charIndex = NSMaxRange(lineRange)
         }
+    }
+
+    /// Build array of UTF-16 offsets for each line start. O(n) once per text change.
+    private static func buildLineStartOffsets(_ string: String) -> [Int] {
+        var offsets = [0]
+        var utf16Offset = 0
+        for char in string {
+            let len = char.utf16.count
+            if char == "\n" {
+                offsets.append(utf16Offset + len)
+            }
+            utf16Offset += len
+        }
+        return offsets
+    }
+
+    /// O(log n) line number lookup via binary search on cached offsets.
+    func lineNumberForUTF16Offset(_ offset: Int) -> Int {
+        var lo = 0, hi = lineStartOffsets.count
+        while lo < hi {
+            let mid = (lo + hi) / 2
+            if lineStartOffsets[mid] <= offset { lo = mid + 1 } else { hi = mid }
+        }
+        return lo  // 1-based: lo is the count of starts <= offset
     }
 
     /// Fast newline count using UTF-16 scan up to the given UTF-16 offset.
@@ -209,7 +237,12 @@ final class EditorNSTextView: NSTextView {
         guard let range = selectedRanges.first?.rangeValue else {
             currentLineNumber = 0; return
         }
-        currentLineNumber = LineNumberRulerView.countNewlines(in: string, upTo: range.location) + 1
+        if let ruler = lineNumberRuler {
+            currentLineNumber = ruler.lineNumberForUTF16Offset(range.location)
+        } else {
+            currentLineNumber = LineNumberRulerView.countNewlines(
+                in: string, upTo: range.location) + 1
+        }
     }
 }
 

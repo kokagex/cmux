@@ -2,6 +2,8 @@ import AppKit
 import Foundation
 
 enum SyntaxHighlighter {
+    private static let maxMatchesPerPattern = 50_000
+
     enum TokenType {
         case keyword, string, number, comment, key, heading, bold, codeSpan
 
@@ -95,9 +97,13 @@ enum SyntaxHighlighter {
         // Apply patterns
         let patternList = Self.patterns(for: language)
         for pattern in patternList {
-            pattern.regex.enumerateMatches(in: text, range: fullRange) { match, _, _ in
-                guard let matchRange = match?.range else { return }
+            var matchCount = 0
+            pattern.regex.enumerateMatches(in: text, range: fullRange) { match, _, stop in
+                guard let matchRange = match?.range,
+                      NSMaxRange(matchRange) <= textStorage.length else { return }
                 textStorage.addAttribute(.foregroundColor, value: pattern.type.color, range: matchRange)
+                matchCount += 1
+                if matchCount >= maxMatchesPerPattern { stop.pointee = true }
             }
         }
         textStorage.endEditing()
@@ -138,10 +144,14 @@ enum SyntaxHighlighter {
             [.foregroundColor: NSColor.labelColor, .font: font], range: range)
         let patternList = Self.patterns(for: language)
         for pattern in patternList {
-            pattern.regex.enumerateMatches(in: text, range: range) { match, _, _ in
-                guard let matchRange = match?.range else { return }
+            var matchCount = 0
+            pattern.regex.enumerateMatches(in: text, range: range) { match, _, stop in
+                guard let matchRange = match?.range,
+                      NSMaxRange(matchRange) <= textStorage.length else { return }
                 textStorage.addAttribute(
                     .foregroundColor, value: pattern.type.color, range: matchRange)
+                matchCount += 1
+                if matchCount >= maxMatchesPerPattern { stop.pointee = true }
             }
         }
         textStorage.endEditing()
