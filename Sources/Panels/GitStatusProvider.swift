@@ -5,6 +5,13 @@ actor GitStatusProvider {
     private let rootPath: String
     private let queue = DispatchQueue(label: "com.cmux.git-status", qos: .utility)
 
+    /// Cached git statuses with timestamp for invalidation.
+    private var cachedStatuses: [String: GitFileStatus] = [:]
+    private var cacheTimestamp: Date = .distantPast
+
+    /// Minimum interval between full git status scans.
+    private static let cacheValidityInterval: TimeInterval = 2.0
+
     init(rootPath: String) {
         self.rootPath = rootPath
     }
@@ -15,7 +22,12 @@ actor GitStatusProvider {
     /// Returns a dictionary mapping absolute file paths to their `GitFileStatus`.
     /// Returns an empty dictionary if not a git repo or the command fails.
     func fetchStatuses() async -> [String: GitFileStatus] {
-        return await withCheckedContinuation { continuation in
+        // Return cache if still valid
+        if Date().timeIntervalSince(cacheTimestamp) < Self.cacheValidityInterval {
+            return cachedStatuses
+        }
+
+        let statuses = await withCheckedContinuation { continuation in
             queue.async { [rootPath] in
                 let result = Self.runGit(
                     args: ["status", "--porcelain=v1", "-z", "--ignored"],
@@ -25,10 +37,13 @@ actor GitStatusProvider {
                     continuation.resume(returning: [:])
                     return
                 }
-                let statuses = Self.parsePortcelainV1(output: output, rootPath: rootPath)
-                continuation.resume(returning: statuses)
+                let parsed = Self.parsePortcelainV1(output: output, rootPath: rootPath)
+                continuation.resume(returning: parsed)
             }
         }
+        cachedStatuses = statuses
+        cacheTimestamp = Date()
+        return statuses
     }
 
     /// Checks which of the given absolute paths are ignored by git.
@@ -72,6 +87,11 @@ actor GitStatusProvider {
                 continuation.resume(returning: ignored)
             }
         }
+    }
+
+    /// Invalidates the cached git statuses, forcing the next `fetchStatuses()` to run a full scan.
+    func invalidateCache() {
+        cacheTimestamp = .distantPast
     }
 
     // MARK: - Private helpers
