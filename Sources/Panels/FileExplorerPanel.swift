@@ -572,9 +572,8 @@ final class FileExplorerPanel: Panel, ObservableObject {
         let work = DispatchWorkItem { [weak self] in
             guard let self, !self.isClosed else { return }
             self.reloadTree()
-            // Working-tree file edits change git status (tracked → modified) but
-            // don't touch .git/index, so FSEvents still triggers a git refresh.
             self.refreshGitStatus()
+            self.refreshIgnoredPaths()
         }
         fsEventDebounceWork = work
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.5, execute: work)
@@ -592,18 +591,16 @@ final class FileExplorerPanel: Panel, ObservableObject {
         let watcher = FileWatcherHelper(
             onChange: { [weak self] changeKind in
                 guard let self, !self.isClosed else { return }
-                switch changeKind {
-                case .contentChanged:
-                    self.refreshGitStatus()
-                case .deletedOrRenamed:
-                    // Atomic writes replace the index file — reattach.
-                    self.refreshGitStatus()
+                // Route through the same debounced handler as FSEvents
+                // to avoid double git status calls.
+                self.handleFSEvents()
+                if case .deletedOrRenamed = changeKind {
                     self.gitIndexWatcher?.reattach()
                 }
             },
             onReattach: { [weak self] in
                 guard let self, !self.isClosed else { return }
-                self.refreshGitStatus()
+                self.handleFSEvents()
             }
         )
         self.gitIndexWatcher = watcher
