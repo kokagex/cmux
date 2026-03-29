@@ -102,14 +102,25 @@ final class FileExplorerDataSource: NSObject, NSOutlineViewDataSource, NSOutline
         let destDirURL = destinationNode?.url ?? URL(fileURLWithPath: panel?.rootPath ?? "/")
         let fm = FileManager.default
         var moved = false
+        var failedNames: [String] = []
         for sourceURL in urls {
             let destURL = destDirURL.appendingPathComponent(sourceURL.lastPathComponent)
             do {
                 try fm.moveItem(at: sourceURL, to: destURL)
                 moved = true
             } catch {
-                // Continue trying other items; individual failures are silently skipped
+                failedNames.append(sourceURL.lastPathComponent)
             }
+        }
+        if !failedNames.isEmpty {
+            let names = failedNames.joined(separator: ", ")
+            let alert = NSAlert()
+            alert.messageText = String(localized: "fileExplorer.move.failed.title",
+                                       defaultValue: "Move failed")
+            alert.informativeText = String(localized: "fileExplorer.move.failed.message",
+                                           defaultValue: "Could not move: \(names)")
+            alert.alertStyle = .warning
+            alert.runModal()
         }
         return moved
     }
@@ -292,6 +303,20 @@ final class FileExplorerDataSource: NSObject, NSOutlineViewDataSource, NSOutline
         let sourceURL = node.url
         let destURL = sourceURL.deletingLastPathComponent().appendingPathComponent(newName)
 
+        // Check if destination already exists
+        if FileManager.default.fileExists(atPath: destURL.path) {
+            let alert = NSAlert()
+            alert.messageText = String(localized: "fileExplorer.rename.conflict.title",
+                                       defaultValue: "File already exists")
+            alert.informativeText = String(localized: "fileExplorer.rename.conflict.message",
+                                           defaultValue: "\"\(newName)\" already exists in this location.")
+            alert.alertStyle = .warning
+            alert.runModal()
+            textField.stringValue = node.name
+            panel?.endEditing()
+            return
+        }
+
         do {
             try FileManager.default.moveItem(at: sourceURL, to: destURL)
         } catch {
@@ -350,6 +375,10 @@ final class FileExplorerDataSource: NSObject, NSOutlineViewDataSource, NSOutline
         if action == #selector(contextNewFile(_:)) || action == #selector(contextNewFolder(_:)) {
             return true
         }
+        if action == #selector(contextPasteFile(_:)) {
+            let pb = NSPasteboard.general
+            return pb.readObjects(forClasses: [NSURL.self], options: nil)?.isEmpty == false
+        }
         return clickedNode() != nil
     }
 
@@ -378,6 +407,56 @@ final class FileExplorerDataSource: NSObject, NSOutlineViewDataSource, NSOutline
         DispatchQueue.main.async { [weak self] in
             self?.contextMenuNode = nil
         }
+    }
+
+    @objc func contextCopyFile(_ sender: Any?) {
+        guard let node = clickedNode() else { return }
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.writeObjects([node.url as NSURL])
+    }
+
+    @objc func contextPasteFile(_ sender: Any?) {
+        guard let panel else { return }
+        let pb = NSPasteboard.general
+        guard let urls = pb.readObjects(forClasses: [NSURL.self], options: nil) as? [URL],
+              !urls.isEmpty else { return }
+
+        let destDir: URL
+        if let node = clickedNode(), node.isDirectory {
+            destDir = node.url
+        } else if let node = clickedNode() {
+            destDir = node.url.deletingLastPathComponent()
+        } else {
+            destDir = URL(fileURLWithPath: panel.rootPath)
+        }
+
+        let fm = FileManager.default
+        for sourceURL in urls {
+            let destURL = destDir.appendingPathComponent(sourceURL.lastPathComponent)
+            try? fm.copyItem(at: sourceURL, to: destURL)
+        }
+        panel.reloadTree()
+    }
+
+    @objc func contextDuplicate(_ sender: Any?) {
+        guard let node = clickedNode() else { return }
+        let fm = FileManager.default
+        let dir = node.url.deletingLastPathComponent()
+        let baseName = node.url.deletingPathExtension().lastPathComponent
+        let ext = node.url.pathExtension
+
+        var suffix = " copy"
+        var counter = 1
+        var destURL: URL
+        repeat {
+            let newName = ext.isEmpty ? baseName + suffix : baseName + suffix + "." + ext
+            destURL = dir.appendingPathComponent(newName)
+            counter += 1
+            suffix = " copy \(counter)"
+        } while fm.fileExists(atPath: destURL.path)
+
+        try? fm.copyItem(at: node.url, to: destURL)
+        panel?.reloadTree()
     }
 
     // MARK: - Helpers
@@ -484,6 +563,7 @@ final class FileExplorerCellView: NSView {
 
         // Name label color based on git status
         nameLabel.stringValue = node.name
+        toolTip = node.url.path
         nameLabel.textColor = color
 
         // Status badge (left side)

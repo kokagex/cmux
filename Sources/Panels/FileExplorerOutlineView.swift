@@ -360,6 +360,35 @@ struct FileExplorerOutlineView: NSViewRepresentable {
         copyPath.target = coordinator
         menu.addItem(copyPath)
 
+        menu.addItem(NSMenuItem.separator())
+
+        let copyFileItem = NSMenuItem(
+            title: String(localized: "fileExplorer.context.copy", defaultValue: "Copy"),
+            action: #selector(FileExplorerDataSource.contextCopyFile(_:)),
+            keyEquivalent: "c"
+        )
+        copyFileItem.keyEquivalentModifierMask = .command
+        copyFileItem.target = coordinator
+        menu.addItem(copyFileItem)
+
+        let pasteItem = NSMenuItem(
+            title: String(localized: "fileExplorer.context.paste", defaultValue: "Paste"),
+            action: #selector(FileExplorerDataSource.contextPasteFile(_:)),
+            keyEquivalent: "v"
+        )
+        pasteItem.keyEquivalentModifierMask = .command
+        pasteItem.target = coordinator
+        menu.addItem(pasteItem)
+
+        let duplicateItem = NSMenuItem(
+            title: String(localized: "fileExplorer.context.duplicate", defaultValue: "Duplicate"),
+            action: #selector(FileExplorerDataSource.contextDuplicate(_:)),
+            keyEquivalent: "d"
+        )
+        duplicateItem.keyEquivalentModifierMask = .command
+        duplicateItem.target = coordinator
+        menu.addItem(duplicateItem)
+
         return menu
     }
 
