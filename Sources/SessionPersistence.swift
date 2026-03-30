@@ -246,7 +246,7 @@ struct SessionFileExplorerPanelSnapshot: Codable, Sendable {
     var selectedPath: String?
     var showHiddenFiles: Bool
     var showIgnoredFiles: Bool
-    var openAction: String  // FileExplorerOpenAction.rawValue
+    var openAction: String?  // Deprecated, kept for session decode compatibility
 }
 
 struct SessionEditorPanelSnapshot: Codable, Sendable {

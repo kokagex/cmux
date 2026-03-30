@@ -486,8 +486,7 @@ extension Workspace {
                 expandedPaths: collectExpandedPaths(fePanel.rootNodes),
                 selectedPath: nil,
                 showHiddenFiles: true,
-                showIgnoredFiles: fePanel.showIgnoredFiles,
-                openAction: fePanel.openAction.rawValue
+                showIgnoredFiles: fePanel.showIgnoredFiles
             )
             editorSnapshot = nil
         case .editor:
@@ -714,9 +713,6 @@ extension Workspace {
             }
             if let feSnapshot = snapshot.fileExplorer {
                 fileExplorerPanel.showIgnoredFiles = feSnapshot.showIgnoredFiles
-                if let action = FileExplorerOpenAction(rawValue: feSnapshot.openAction) {
-                    fileExplorerPanel.openAction = action
-                }
             }
             applySessionPanelMetadata(snapshot, toPanelId: fileExplorerPanel.id)
             return fileExplorerPanel.id

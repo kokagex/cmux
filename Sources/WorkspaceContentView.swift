@@ -320,27 +320,8 @@ struct WorkspaceContentView: View {
                     },
                     onTriggerFlash: { workspace.triggerDebugFlash(panelId: panel.id) },
                     onOpenFileInEditor: { filePath, isPreview in
-                        // Find a non-file-explorer pane to open the editor in.
-                        // If none exists, split the current pane horizontally.
-                        let explorerPaneId = paneId
-                        let adjacentPaneId: Bonsplit.PaneID? = {
-                            // Try right first, then left, then down, then up
-                            for direction: Bonsplit.NavigationDirection in [.right, .left, .down, .up] {
-                                if let candidate = workspace.bonsplitController.adjacentPane(
-                                    to: explorerPaneId, direction: direction
-                                ) {
-                                    // Ensure the adjacent pane isn't another file explorer
-                                    let tabs = workspace.bonsplitController.tabs(inPane: candidate)
-                                    let isExplorer = tabs.allSatisfy { $0.kind == "fileExplorer" }
-                                    if !isExplorer || tabs.isEmpty {
-                                        return candidate
-                                    }
-                                }
-                            }
-                            return nil
-                        }()
-
-                        if let targetPane = adjacentPaneId {
+                        let targetPane = adjacentNonExplorerPane(workspace: workspace, explorerPaneId: paneId)
+                        if let targetPane {
                             workspace.newEditorSurface(
                                 inPane: targetPane,
                                 filePath: filePath,
@@ -348,9 +329,8 @@ struct WorkspaceContentView: View {
                                 focus: !isPreview
                             )
                         } else {
-                            // No adjacent pane — split horizontally and open in the new right pane
                             if let newPane = workspace.bonsplitController.splitPane(
-                                explorerPaneId,
+                                paneId,
                                 orientation: .horizontal
                             ) {
                                 workspace.newEditorSurface(
@@ -358,6 +338,27 @@ struct WorkspaceContentView: View {
                                     filePath: filePath,
                                     isPreview: isPreview,
                                     focus: !isPreview
+                                )
+                            }
+                        }
+                    },
+                    onOpenFileInBrowser: { url in
+                        let targetPane = adjacentNonExplorerPane(workspace: workspace, explorerPaneId: paneId)
+                        if let targetPane {
+                            workspace.newBrowserSurface(
+                                inPane: targetPane,
+                                url: url,
+                                focus: true
+                            )
+                        } else {
+                            if let newPane = workspace.bonsplitController.splitPane(
+                                paneId,
+                                orientation: .horizontal
+                            ) {
+                                workspace.newBrowserSurface(
+                                    inPane: newPane,
+                                    url: url,
+                                    focus: true
                                 )
                             }
                         }
@@ -427,6 +428,22 @@ struct WorkspaceContentView: View {
                 bonsplitView
             }
         }
+    }
+
+    /// Find an adjacent pane that isn't a file explorer, for opening editors/browsers beside the explorer.
+    private func adjacentNonExplorerPane(workspace: Workspace, explorerPaneId: Bonsplit.PaneID) -> Bonsplit.PaneID? {
+        for direction: Bonsplit.NavigationDirection in [.right, .left, .down, .up] {
+            if let candidate = workspace.bonsplitController.adjacentPane(
+                to: explorerPaneId, direction: direction
+            ) {
+                let tabs = workspace.bonsplitController.tabs(inPane: candidate)
+                let isExplorer = tabs.allSatisfy { $0.kind == "fileExplorer" }
+                if !isExplorer || tabs.isEmpty {
+                    return candidate
+                }
+            }
+        }
+        return nil
     }
 
     private func syncBonsplitNotificationBadges() {

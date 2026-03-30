@@ -17,6 +17,7 @@ struct PanelContentView: View {
     let onRequestPanelFocus: () -> Void
     let onTriggerFlash: () -> Void
     var onOpenFileInEditor: ((String, Bool) -> Void)?
+    var onOpenFileInBrowser: ((URL) -> Void)?
 
     var body: some View {
         switch panel.panelType {
@@ -64,7 +65,8 @@ struct PanelContentView: View {
                     isVisibleInUI: isVisibleInUI,
                     portalPriority: portalPriority,
                     onRequestPanelFocus: onRequestPanelFocus,
-                    onOpenFileInEditor: onOpenFileInEditor
+                    onOpenFileInEditor: onOpenFileInEditor,
+                    onOpenFileInBrowser: onOpenFileInBrowser
                 )
             }
         case .editor:

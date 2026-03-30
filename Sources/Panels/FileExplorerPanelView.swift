@@ -9,6 +9,7 @@ struct FileExplorerPanelView: View {
     let portalPriority: Int
     let onRequestPanelFocus: () -> Void
     var onOpenFileInEditor: ((String, Bool) -> Void)?
+    var onOpenFileInBrowser: ((URL) -> Void)?
 
     @State private var focusFlashOpacity: Double = 0.0
     @State private var focusFlashAnimationGeneration: Int = 0
@@ -18,7 +19,7 @@ struct FileExplorerPanelView: View {
         VStack(spacing: 0) {
             toolbar
             Divider()
-            FileExplorerOutlineView(panel: panel, onFileOpen: { openFile($0) }, onFilePreview: { previewFile($0) })
+            FileExplorerOutlineView(panel: panel, onFileOpen: { openFile($0) }, onFilePreview: { previewFile($0) }, onFileOpenInEditor: { onOpenFileInEditor?($0, false) }, onFileOpenInBrowser: onOpenFileInBrowser)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(backgroundColor)
@@ -92,20 +93,6 @@ struct FileExplorerPanelView: View {
                     isOn: $panel.showIgnoredFiles
                 )
 
-                Divider()
-
-                // ファイルオープン動作
-                Picker(
-                    String(localized: "fileExplorer.toolbar.openAction", defaultValue: "Open Files With"),
-                    selection: $panel.openAction
-                ) {
-                    Text(String(localized: "fileExplorer.toolbar.openAction.editor", defaultValue: "$EDITOR (Terminal)"))
-                        .tag(FileExplorerOpenAction.editor)
-                    Text(String(localized: "fileExplorer.toolbar.openAction.builtin", defaultValue: "Built-in Viewer"))
-                        .tag(FileExplorerOpenAction.builtin)
-                    Text(String(localized: "fileExplorer.toolbar.openAction.system", defaultValue: "System Default"))
-                        .tag(FileExplorerOpenAction.system)
-                }
             } label: {
                 Image(systemName: "ellipsis")
                     .font(.system(size: 12))
@@ -147,15 +134,19 @@ struct FileExplorerPanelView: View {
     }
 
     private func openFile(_ node: FileNode) {
-        let path = node.url.path
-        if EditorPanel.isBinaryFile(at: path) {
+        if FileExplorerDataSource.isWebKitRenderable(node.url) {
+            onOpenFileInBrowser?(node.url)
+        } else if EditorPanel.isBinaryFile(at: node.url.path) {
             NSWorkspace.shared.open(node.url)
         } else {
-            onOpenFileInEditor?(path, false)
+            onOpenFileInEditor?(node.url.path, false)
         }
     }
 
     private func previewFile(_ node: FileNode) {
+        if FileExplorerDataSource.isWebKitRenderable(node.url) {
+            return
+        }
         let path = node.url.path
         if EditorPanel.isBinaryFile(at: path) {
             return

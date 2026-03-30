@@ -2,14 +2,6 @@ import Foundation
 import Combine
 import CoreServices
 
-// MARK: - FileExplorerOpenAction
-
-enum FileExplorerOpenAction: String, Codable, Sendable {
-    case editor
-    case builtin
-    case system
-}
-
 // MARK: - Weak (FSEventStream callback helper)
 
 /// Weak wrapper for FSEventStream C callback context.
@@ -71,8 +63,6 @@ final class FileExplorerPanel: Panel, ObservableObject {
         didSet { reloadTree() }
     }
 
-    /// What happens when the user opens a file in the explorer.
-    @Published var openAction: FileExplorerOpenAction = .editor
 
     /// Token incremented to trigger focus flash animation.
     @Published private(set) var focusFlashToken: Int = 0

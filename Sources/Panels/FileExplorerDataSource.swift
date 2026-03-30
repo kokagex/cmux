@@ -10,6 +10,8 @@ final class FileExplorerDataSource: NSObject, NSOutlineViewDataSource, NSOutline
     weak var outlineView: NSOutlineView?
     var onFileDoubleClick: ((FileNode) -> Void)?
     var onFileSingleClick: ((FileNode) -> Void)?
+    var onFileOpenInEditor: ((String) -> Void)?
+    var onFileOpenInBrowser: ((URL) -> Void)?
     var onNodeExpand: ((FileNode) -> Void)?
     var onNodeCollapse: ((FileNode) -> Void)?
 
@@ -379,6 +381,18 @@ final class FileExplorerDataSource: NSObject, NSOutlineViewDataSource, NSOutline
             let pb = NSPasteboard.general
             return pb.readObjects(forClasses: [NSURL.self], options: nil)?.isEmpty == false
         }
+        if action == #selector(contextOpenInEditor(_:)) {
+            guard let node = clickedNode(), !node.isDirectory else { return false }
+            return !EditorPanel.isBinaryFile(at: node.url.path)
+        }
+        if action == #selector(contextOpenInBrowser(_:)) {
+            guard let node = clickedNode(), !node.isDirectory else { return false }
+            return FileExplorerDataSource.isWebKitRenderable(node.url)
+        }
+        if action == #selector(contextOpenWithSystem(_:)) {
+            guard let node = clickedNode() else { return false }
+            return !node.isDirectory
+        }
         return clickedNode() != nil
     }
 
@@ -457,6 +471,34 @@ final class FileExplorerDataSource: NSObject, NSOutlineViewDataSource, NSOutline
 
         try? fm.copyItem(at: node.url, to: destURL)
         panel?.reloadTree()
+    }
+
+    @objc func contextOpenInEditor(_ sender: Any?) {
+        guard let node = clickedNode(), !node.isDirectory else { return }
+        onFileOpenInEditor?(node.url.path)
+    }
+
+    @objc func contextOpenInBrowser(_ sender: Any?) {
+        guard let node = clickedNode(), !node.isDirectory else { return }
+        onFileOpenInBrowser?(node.url)
+    }
+
+    @objc func contextOpenWithSystem(_ sender: Any?) {
+        guard let node = clickedNode(), !node.isDirectory else { return }
+        NSWorkspace.shared.open(node.url)
+    }
+
+    /// Returns true if WebKit can natively render the file (HTML, PDF, images).
+    static func isWebKitRenderable(_ url: URL) -> Bool {
+        let ext = url.pathExtension.lowercased()
+        switch ext {
+        case "html", "htm", "xhtml",
+             "pdf",
+             "png", "jpg", "jpeg", "gif", "svg", "webp", "bmp", "ico", "tiff", "tif", "heic":
+            return true
+        default:
+            return false
+        }
     }
 
     // MARK: - Helpers

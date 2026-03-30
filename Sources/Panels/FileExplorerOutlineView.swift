@@ -51,6 +51,8 @@ struct FileExplorerOutlineView: NSViewRepresentable {
     @ObservedObject var panel: FileExplorerPanel
     let onFileOpen: (FileNode) -> Void
     let onFilePreview: ((FileNode) -> Void)?
+    var onFileOpenInEditor: ((String) -> Void)?
+    var onFileOpenInBrowser: ((URL) -> Void)?
 
     // MARK: - Coordinator
 
@@ -62,11 +64,13 @@ struct FileExplorerOutlineView: NSViewRepresentable {
         /// Set to true during programmatic auto-expand to avoid recording as user action.
         var isAutoExpanding: Bool = false
 
-        init(panel: FileExplorerPanel, onFileOpen: @escaping (FileNode) -> Void, onFilePreview: ((FileNode) -> Void)?) {
+        init(panel: FileExplorerPanel, onFileOpen: @escaping (FileNode) -> Void, onFilePreview: ((FileNode) -> Void)?, onFileOpenInEditor: ((String) -> Void)?, onFileOpenInBrowser: ((URL) -> Void)?) {
             self.dataSource = FileExplorerDataSource()
             self.dataSource.panel = panel
             self.dataSource.onFileDoubleClick = onFileOpen
             self.dataSource.onFileSingleClick = onFilePreview
+            self.dataSource.onFileOpenInEditor = onFileOpenInEditor
+            self.dataSource.onFileOpenInBrowser = onFileOpenInBrowser
             self.dataSource.onNodeExpand = { [weak panel, weak self] node in
                 if self?.isAutoExpanding != true {
                     panel?.userCollapsedPaths.remove(node.url.path)
@@ -82,7 +86,7 @@ struct FileExplorerOutlineView: NSViewRepresentable {
     }
 
     func makeCoordinator() -> Coordinator {
-        Coordinator(panel: panel, onFileOpen: onFileOpen, onFilePreview: onFilePreview)
+        Coordinator(panel: panel, onFileOpen: onFileOpen, onFilePreview: onFilePreview, onFileOpenInEditor: onFileOpenInEditor, onFileOpenInBrowser: onFileOpenInBrowser)
     }
 
     // MARK: - NSViewRepresentable
@@ -341,6 +345,43 @@ struct FileExplorerOutlineView: NSViewRepresentable {
         )
         delete.target = coordinator
         menu.addItem(delete)
+
+        menu.addItem(NSMenuItem.separator())
+
+        // Open With submenu
+        let openWithMenu = NSMenu()
+
+        let openInEditor = NSMenuItem(
+            title: String(localized: "fileExplorer.contextMenu.openWith.editor", defaultValue: "Editor"),
+            action: #selector(FileExplorerDataSource.contextOpenInEditor(_:)),
+            keyEquivalent: ""
+        )
+        openInEditor.target = coordinator
+        openWithMenu.addItem(openInEditor)
+
+        let openInBrowser = NSMenuItem(
+            title: String(localized: "fileExplorer.contextMenu.openWith.browser", defaultValue: "Browser"),
+            action: #selector(FileExplorerDataSource.contextOpenInBrowser(_:)),
+            keyEquivalent: ""
+        )
+        openInBrowser.target = coordinator
+        openWithMenu.addItem(openInBrowser)
+
+        let openWithSystem = NSMenuItem(
+            title: String(localized: "fileExplorer.contextMenu.openWith.system", defaultValue: "System Default"),
+            action: #selector(FileExplorerDataSource.contextOpenWithSystem(_:)),
+            keyEquivalent: ""
+        )
+        openWithSystem.target = coordinator
+        openWithMenu.addItem(openWithSystem)
+
+        let openWithItem = NSMenuItem(
+            title: String(localized: "fileExplorer.contextMenu.openWith", defaultValue: "Open With"),
+            action: nil,
+            keyEquivalent: ""
+        )
+        openWithItem.submenu = openWithMenu
+        menu.addItem(openWithItem)
 
         menu.addItem(NSMenuItem.separator())
 
