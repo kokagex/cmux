@@ -23,6 +23,7 @@ final class AppIconSettingsTests: XCTestCase {
         var stopObservationCallCount = 0
 
         let environment = AppIconSettings.Environment(
+            isApplicationFinishedLaunching: { true },
             imageForMode: { mode in
                 XCTAssertEqual(mode, .dark)
                 return expectedIcon
@@ -55,6 +56,7 @@ final class AppIconSettingsTests: XCTestCase {
         var stopObservationCallCount = 0
 
         let environment = AppIconSettings.Environment(
+            isApplicationFinishedLaunching: { true },
             imageForMode: { mode in
                 XCTFail("Automatic mode should not request a manual icon image: \(mode.rawValue)")
                 return nil
@@ -77,6 +79,42 @@ final class AppIconSettingsTests: XCTestCase {
 
         XCTAssertEqual(dockTileNotificationCount, 1)
         XCTAssertEqual(startObservationCallCount, 1)
+        XCTAssertEqual(stopObservationCallCount, 0)
+    }
+
+    func testApplyDarkBeforeLaunchDoesNotTouchRuntimeIconState() {
+        var imageRequestCount = 0
+        var runtimeIconSetCount = 0
+        var dockTileNotificationCount = 0
+        var startObservationCallCount = 0
+        var stopObservationCallCount = 0
+
+        let environment = AppIconSettings.Environment(
+            isApplicationFinishedLaunching: { false },
+            imageForMode: { _ in
+                imageRequestCount += 1
+                return NSImage(size: NSSize(width: 16, height: 16))
+            },
+            setApplicationIconImage: { _ in
+                runtimeIconSetCount += 1
+            },
+            startAppearanceObservation: {
+                startObservationCallCount += 1
+            },
+            stopAppearanceObservation: {
+                stopObservationCallCount += 1
+            },
+            notifyDockTilePlugin: {
+                dockTileNotificationCount += 1
+            }
+        )
+
+        AppIconSettings.applyIcon(.dark, environment: environment)
+
+        XCTAssertEqual(imageRequestCount, 0)
+        XCTAssertEqual(runtimeIconSetCount, 0)
+        XCTAssertEqual(dockTileNotificationCount, 0)
+        XCTAssertEqual(startObservationCallCount, 0)
         XCTAssertEqual(stopObservationCallCount, 0)
     }
 }
@@ -194,6 +232,52 @@ final class NotificationDockBadgeTests: XCTestCase {
 
         defaults.set(true, forKey: MenuBarExtraSettings.showInMenuBarKey)
         XCTAssertTrue(MenuBarExtraSettings.showsMenuBarExtra(defaults: defaults))
+    }
+
+    func testMenuBarOnlyPreferenceDefaultsToRegularActivationPolicy() {
+        let suiteName = "MenuBarOnlySettingsTests.\(UUID().uuidString)"
+        guard let defaults = UserDefaults(suiteName: suiteName) else {
+            XCTFail("Failed to create isolated UserDefaults suite")
+            return
+        }
+        defer {
+            defaults.removePersistentDomain(forName: suiteName)
+        }
+
+        XCTAssertFalse(MenuBarOnlySettings.isEnabled(defaults: defaults))
+        XCTAssertEqual(MenuBarOnlySettings.activationPolicy(defaults: defaults), .regular)
+        XCTAssertFalse(MenuBarOnlySettings.shouldShowMainWindowMenuItem(defaults: defaults))
+
+        defaults.set(true, forKey: MenuBarOnlySettings.menuBarOnlyKey)
+        XCTAssertTrue(MenuBarOnlySettings.isEnabled(defaults: defaults))
+        XCTAssertEqual(MenuBarOnlySettings.activationPolicy(defaults: defaults), .accessory)
+        XCTAssertTrue(MenuBarOnlySettings.shouldShowMainWindowMenuItem(defaults: defaults))
+
+        defaults.set(false, forKey: MenuBarOnlySettings.menuBarOnlyKey)
+        XCTAssertFalse(MenuBarOnlySettings.isEnabled(defaults: defaults))
+        XCTAssertEqual(MenuBarOnlySettings.activationPolicy(defaults: defaults), .regular)
+        XCTAssertFalse(MenuBarOnlySettings.shouldShowMainWindowMenuItem(defaults: defaults))
+    }
+
+    func testMenuBarOnlyForcesMenuBarExtraVisible() {
+        let suiteName = "MenuBarOnlyVisibilityTests.\(UUID().uuidString)"
+        guard let defaults = UserDefaults(suiteName: suiteName) else {
+            XCTFail("Failed to create isolated UserDefaults suite")
+            return
+        }
+        defer {
+            defaults.removePersistentDomain(forName: suiteName)
+        }
+
+        defaults.set(false, forKey: MenuBarExtraSettings.showInMenuBarKey)
+        XCTAssertFalse(MenuBarExtraSettings.shouldInstallMenuBarExtra(defaults: defaults))
+
+        defaults.set(true, forKey: MenuBarOnlySettings.menuBarOnlyKey)
+        XCTAssertTrue(MenuBarExtraSettings.shouldInstallMenuBarExtra(defaults: defaults))
+
+        defaults.set(false, forKey: MenuBarOnlySettings.menuBarOnlyKey)
+        defaults.set(true, forKey: MenuBarExtraSettings.showInMenuBarKey)
+        XCTAssertTrue(MenuBarExtraSettings.shouldInstallMenuBarExtra(defaults: defaults))
     }
 
     func testNotificationSoundUsesSystemSoundForDefaultAndNamedSounds() {
@@ -620,6 +704,16 @@ final class NotificationDockBadgeTests: XCTestCase {
         XCTAssertTrue(NotificationAuthorizationState.authorized.allowsDelivery)
         XCTAssertTrue(NotificationAuthorizationState.provisional.allowsDelivery)
         XCTAssertTrue(NotificationAuthorizationState.ephemeral.allowsDelivery)
+    }
+
+    func testNotificationDeliveryAuthorizationUsesCachedTerminalStates() {
+        XCTAssertNil(TerminalNotificationStore.cachedDeliveryAuthorizationDecision(for: .unknown, isAppActive: false))
+        XCTAssertNil(TerminalNotificationStore.cachedDeliveryAuthorizationDecision(for: .notDetermined, isAppActive: true))
+        XCTAssertEqual(TerminalNotificationStore.cachedDeliveryAuthorizationDecision(for: .notDetermined, isAppActive: false), false)
+        XCTAssertEqual(TerminalNotificationStore.cachedDeliveryAuthorizationDecision(for: .denied, isAppActive: false), false)
+        XCTAssertNil(TerminalNotificationStore.cachedDeliveryAuthorizationDecision(for: .authorized, isAppActive: false))
+        XCTAssertNil(TerminalNotificationStore.cachedDeliveryAuthorizationDecision(for: .provisional, isAppActive: false))
+        XCTAssertNil(TerminalNotificationStore.cachedDeliveryAuthorizationDecision(for: .ephemeral, isAppActive: false))
     }
 
     func testNotificationAuthorizationDefersFirstPromptWhileAppIsInactive() {

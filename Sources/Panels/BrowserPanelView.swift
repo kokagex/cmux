@@ -5,6 +5,7 @@ import AppKit
 import ObjectiveC
 
 private var cmuxBrowserPanelNeedsRenderingStateReattachKey: UInt8 = 0
+let browserOmnibarTextFieldIdentifier = NSUserInterfaceItemIdentifier("cmux.browserOmnibarTextField")
 
 private func browserPanelViewObjectID(_ object: AnyObject?) -> String {
     guard let object else { return "nil" }
@@ -77,7 +78,7 @@ private extension WKWebView {
 
 #if DEBUG
         if !firedSelectors.isEmpty {
-            dlog(
+            cmuxDebugLog(
                 "\(force ? "browser.localHost.webview.forceRefresh" : "browser.localHost.webview.reattach") " +
                 "web=\(browserPanelViewObjectID(self)) " +
                 "reason=\(reason) selectors=\(firedSelectors.joined(separator: ",")) " +
@@ -94,7 +95,7 @@ private extension WKWebView {
         }
 #if DEBUG
         if !firedSelectors.isEmpty {
-            dlog(
+            cmuxDebugLog(
                 "browser.localHost.webview.hidden web=\(browserPanelViewObjectID(self)) " +
                 "reason=\(reason) selectors=\(firedSelectors.joined(separator: ","))"
             )
@@ -423,8 +424,7 @@ struct BrowserPanelView: View {
     @State private var addressBarHeight: CGFloat = 0
     @State private var isBrowserImportHintPopoverPresented = false
     @State private var lastHandledAddressBarFocusRequestId: UUID?
-    @State private var pendingAddressBarFocusRetryRequestId: UUID?
-    @State private var pendingAddressBarFocusRetryGeneration: UInt64 = 0
+    @State private var omnibarSelectAllRequestId: UInt64 = 0
     @State private var isBrowserProfileMenuPresented = false
     @State private var isBrowserThemeMenuPresented = false
     @State private var browserChromeStyle = BrowserChromeStyle.resolve(
@@ -549,7 +549,7 @@ struct BrowserPanelView: View {
     }
 
     var body: some View {
-        // Layering contract: browser Cmd+F UI is mounted in the portal-hosted AppKit
+        // Layering contract: browser find UI is mounted in the portal-hosted AppKit
         // container. Rendering it here can hide it behind the portal-hosted WKWebView.
         VStack(spacing: 0) {
             addressBar
@@ -558,7 +558,7 @@ struct BrowserPanelView: View {
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         .overlay {
-            // Keep Cmd+F usable when the browser is still in the empty new-tab
+            // Keep browser find usable when the browser is still in the empty new-tab
             // state (no WKWebView mounted yet). WebView-backed cases are hosted
             // in AppKit by WindowBrowserPortal to avoid layering/clipping issues.
             if !panel.shouldRenderWebView, let searchState = panel.searchState {
@@ -618,7 +618,7 @@ struct BrowserPanelView: View {
             return webView === panel?.webView
         }) { _ in
 #if DEBUG
-            dlog(
+            cmuxDebugLog(
                 "browser.focus.clickIntent panel=\(panel.id.uuidString.prefix(5)) " +
                 "isFocused=\(isFocused ? 1 : 0) " +
                 "addressFocused=\(addressBarFocused ? 1 : 0)"
@@ -711,6 +711,10 @@ struct BrowserPanelView: View {
             panel.refreshAppearanceDrivenColors()
         }
         .onChange(of: panel.pendingAddressBarFocusRequestId) { _ in
+            applyPendingAddressBarFocusRequestIfNeeded()
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .commandPaletteVisibilityDidChange)) { notification in
+            guard commandPaletteVisibilityNotificationMatchesPanelWindow(notification) else { return }
             applyPendingAddressBarFocusRequestIfNeeded()
         }
         .onChange(of: panel.profileID) { _ in
@@ -874,7 +878,7 @@ struct BrowserPanelView: View {
         return HStack(spacing: 0) {
             Button(action: {
                 #if DEBUG
-                dlog("browser.back panel=\(panel.id.uuidString.prefix(5))")
+                cmuxDebugLog("browser.back panel=\(panel.id.uuidString.prefix(5))")
                 #endif
                 panel.goBack()
             }) {
@@ -890,7 +894,7 @@ struct BrowserPanelView: View {
 
             Button(action: {
                 #if DEBUG
-                dlog("browser.forward panel=\(panel.id.uuidString.prefix(5))")
+                cmuxDebugLog("browser.forward panel=\(panel.id.uuidString.prefix(5))")
                 #endif
                 panel.goForward()
             }) {
@@ -907,12 +911,12 @@ struct BrowserPanelView: View {
             Button(action: {
                 if panel.isLoading {
                     #if DEBUG
-                    dlog("browser.stop panel=\(panel.id.uuidString.prefix(5))")
+                    cmuxDebugLog("browser.stop panel=\(panel.id.uuidString.prefix(5))")
                     #endif
                     panel.stopLoading()
                 } else {
                     #if DEBUG
-                    dlog("browser.reload panel=\(panel.id.uuidString.prefix(5))")
+                    cmuxDebugLog("browser.reload panel=\(panel.id.uuidString.prefix(5))")
                     #endif
                     panel.reload()
                 }
@@ -1167,6 +1171,7 @@ struct BrowserPanelView: View {
             }
 
             OmnibarTextFieldRepresentable(
+                panelId: panel.id,
                 text: Binding(
                     get: { omnibarState.buffer },
                     set: { newValue in
@@ -1176,6 +1181,7 @@ struct BrowserPanelView: View {
                     }
                 ),
                 isFocused: $addressBarFocused,
+                selectAllRequestId: omnibarSelectAllRequestId,
                 inlineCompletion: inlineCompletion,
                 placeholder: String(localized: "browser.addressBar.placeholder", defaultValue: "Search or enter URL"),
                 onTap: {
@@ -1362,7 +1368,7 @@ struct BrowserPanelView: View {
         let next = isPanelFocused && !panel.shouldSuppressWebViewFocus()
         if cmuxWebView.allowsFirstResponderAcquisition != next {
 #if DEBUG
-            dlog(
+            cmuxDebugLog(
                 "browser.focus.policy.resync panel=\(panel.id.uuidString.prefix(5)) " +
                 "web=\(ObjectIdentifier(cmuxWebView)) old=\(cmuxWebView.allowsFirstResponderAcquisition ? 1 : 0) " +
                 "new=\(next ? 1 : 0) reason=\(reason) " +
@@ -1457,7 +1463,7 @@ struct BrowserPanelView: View {
         if !detail.isEmpty {
             line += " \(detail)"
         }
-        dlog(line)
+        cmuxDebugLog(line)
     }
 #endif
 
@@ -1490,27 +1496,31 @@ struct BrowserPanelView: View {
         return false
     }
 
-    private func clearPendingAddressBarFocusRetry() {
-        pendingAddressBarFocusRetryRequestId = nil
-        pendingAddressBarFocusRetryGeneration &+= 1
-    }
-
-    private func schedulePendingAddressBarFocusRetryIfNeeded(requestId: UUID) {
-        guard pendingAddressBarFocusRetryRequestId != requestId else { return }
-        pendingAddressBarFocusRetryRequestId = requestId
-        pendingAddressBarFocusRetryGeneration &+= 1
-        let generation = pendingAddressBarFocusRetryGeneration
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.10) {
-            guard pendingAddressBarFocusRetryGeneration == generation else { return }
-            pendingAddressBarFocusRetryRequestId = nil
-            guard panel.pendingAddressBarFocusRequestId == requestId else { return }
-            applyPendingAddressBarFocusRequestIfNeeded()
+    private func commandPaletteVisibilityNotificationMatchesPanelWindow(_ notification: Notification) -> Bool {
+        if let notificationWindow = notification.object as? NSWindow,
+           panel.webView.window === notificationWindow {
+            return true
         }
+
+        guard let app = AppDelegate.shared,
+              let manager = app.tabManagerFor(tabId: panel.workspaceId),
+              let panelWindowId = app.windowId(for: manager) else {
+            return false
+        }
+
+        if let notificationWindowId = notification.userInfo?["windowId"] as? UUID {
+            return notificationWindowId == panelWindowId
+        }
+
+        if let notificationWindow = notification.object as? NSWindow,
+           let panelWindow = app.mainWindow(for: panelWindowId) {
+            return notificationWindow === panelWindow
+        }
+        return false
     }
 
     private func applyPendingAddressBarFocusRequestIfNeeded() {
         guard let requestId = panel.pendingAddressBarFocusRequestId else {
-            clearPendingAddressBarFocusRetry()
             return
         }
         guard !isCommandPaletteVisibleForPanelWindow() else {
@@ -1520,10 +1530,8 @@ struct BrowserPanelView: View {
                 detail: "reason=command_palette_visible request=\(requestId.uuidString.prefix(8))"
             )
 #endif
-            schedulePendingAddressBarFocusRetryIfNeeded(requestId: requestId)
             return
         }
-        clearPendingAddressBarFocusRetry()
         guard lastHandledAddressBarFocusRequestId != requestId else {
 #if DEBUG
             logBrowserFocusState(
@@ -1801,7 +1809,7 @@ struct BrowserPanelView: View {
 
     private func openDevTools() {
         #if DEBUG
-        dlog("browser.toggleDevTools panel=\(panel.id.uuidString.prefix(5))")
+        cmuxDebugLog("browser.toggleDevTools panel=\(panel.id.uuidString.prefix(5))")
         #endif
         if !panel.toggleDeveloperTools() {
             NSSound.beep()
@@ -2095,107 +2103,23 @@ struct BrowserPanelView: View {
 
     private func matchingOpenTabSuggestions(for query: String, limit: Int) -> [OmnibarOpenTabMatch] {
         guard !query.isEmpty, limit > 0 else { return [] }
-
-        let loweredQuery = query.lowercased()
         let singleCharacterQuery = omnibarSingleCharacterQuery(for: query)
         let includeCurrentPanelForSingleCharacterQuery = singleCharacterQuery != nil
-        let tabManager = AppDelegate.shared?.tabManager
-        let currentPanelWorkspaceId = tabManager?.tabs.first(where: { tab in
-            tab.panels[panel.id] is BrowserPanel
-        })?.id
-        var matches: [OmnibarOpenTabMatch] = []
-        var seenKeys = Set<String>()
-
-        func preferredPanelURL(_ browserPanel: BrowserPanel) -> String? {
-            browserPanel.preferredURLStringForOmnibar()
-        }
-
-        func addMatch(
-            tabId: UUID,
-            panelId: UUID,
-            url: String,
-            title: String?,
-            isKnownOpenTab: Bool,
-            matches: inout [OmnibarOpenTabMatch],
-            seenKeys: inout Set<String>
-        ) {
-            let key = "\(tabId.uuidString.lowercased())|\(panelId.uuidString.lowercased())|\(url.lowercased())"
-            guard !seenKeys.contains(key) else { return }
-            seenKeys.insert(key)
-            matches.append(
-                OmnibarOpenTabMatch(
-                    tabId: tabId,
-                    panelId: panelId,
-                    url: url,
-                    title: title,
-                    isKnownOpenTab: isKnownOpenTab
-                )
-            )
-        }
-
-        if includeCurrentPanelForSingleCharacterQuery,
-           let query = singleCharacterQuery,
-           let currentURL = preferredPanelURL(panel),
-           !currentURL.isEmpty {
-            let rawTitle = panel.pageTitle.trimmingCharacters(in: .whitespacesAndNewlines)
-            let title = rawTitle.isEmpty ? nil : rawTitle
-            if omnibarHasSingleCharacterPrefixMatch(query: query, url: currentURL, title: title) {
-                addMatch(
-                    tabId: currentPanelWorkspaceId ?? panel.workspaceId,
-                    panelId: panel.id,
-                    url: currentURL,
-                    title: title,
-                    isKnownOpenTab: currentPanelWorkspaceId != nil,
-                    matches: &matches,
-                    seenKeys: &seenKeys
-                )
-            }
-        }
-
-        guard let tabManager else { return matches }
-
-        for tab in tabManager.tabs {
-            for (panelId, anyPanel) in tab.panels {
-                guard let browserPanel = anyPanel as? BrowserPanel else { continue }
-                guard let currentURL = preferredPanelURL(browserPanel),
-                      !currentURL.isEmpty else { continue }
-                let isCurrentPanel = tab.id == panel.workspaceId && panelId == panel.id
-                if isCurrentPanel && !includeCurrentPanelForSingleCharacterQuery {
-                    continue
-                }
-
-                let rawTitle = browserPanel.pageTitle.trimmingCharacters(in: .whitespacesAndNewlines)
-                let title = rawTitle.isEmpty ? nil : rawTitle
-                let isMatch: Bool = {
-                    if let singleCharacterQuery {
-                        return omnibarHasSingleCharacterPrefixMatch(
-                            query: singleCharacterQuery,
-                            url: currentURL,
-                            title: title
-                        )
-                    }
-                    let haystacks = [
-                        currentURL.lowercased(),
-                        (title ?? "").lowercased(),
-                    ]
-                    return haystacks.contains { $0.contains(loweredQuery) }
-                }()
-                guard isMatch else { continue }
-
-                addMatch(
-                    tabId: tab.id,
-                    panelId: panelId,
-                    url: currentURL,
-                    title: title,
-                    isKnownOpenTab: true,
-                    matches: &matches,
-                    seenKeys: &seenKeys
-                )
-            }
-        }
-
-        if matches.count <= limit { return matches }
-        return Array(matches.prefix(limit))
+        let currentPanelSnapshot = BrowserOpenTabSuggestionSnapshot(
+            workspaceId: panel.workspaceId,
+            panelId: panel.id,
+            url: panel.preferredURLStringForOmnibar(),
+            title: panel.pageTitle
+        )
+        let tabManager = AppDelegate.shared?.tabManagerFor(tabId: panel.workspaceId) ?? AppDelegate.shared?.tabManager
+        return tabManager?.matchingOpenBrowserTabSuggestions(
+            for: query,
+            currentWorkspaceId: panel.workspaceId,
+            currentPanelId: panel.id,
+            currentPanelSnapshot: currentPanelSnapshot,
+            includeCurrentPanelForSingleCharacterQuery: includeCurrentPanelForSingleCharacterQuery,
+            limit: limit
+        ) ?? []
     }
 
     private func forcedRemoteSuggestionsForUITest() -> [String]? {
@@ -2220,14 +2144,7 @@ struct BrowserPanelView: View {
             refreshSuggestions()
         }
         if effects.shouldSelectAll {
-            // Apply immediately for fast Cmd+L typing, then retry once in case
-            // first responder wasn't fully settled on the same runloop.
-            DispatchQueue.main.async {
-                NSApp.sendAction(#selector(NSText.selectAll(_:)), to: nil, from: nil)
-            }
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
-                NSApp.sendAction(#selector(NSText.selectAll(_:)), to: nil, from: nil)
-            }
+            omnibarSelectAllRequestId &+= 1
         }
         if effects.shouldBlurToWebView {
             hideSuggestions()
@@ -2241,7 +2158,7 @@ struct BrowserPanelView: View {
                       !panel.webView.isHiddenOrHasHiddenAncestor else { return }
                 guard shouldApplyAddressBarExitFallback(in: window) else {
 #if DEBUG
-                    dlog(
+                    cmuxDebugLog(
                         "browser.focus.addressBar.exit.handoff panel=\(panel.id.uuidString.prefix(5)) " +
                         "result=skip_not_focused"
                     )
@@ -2256,7 +2173,7 @@ struct BrowserPanelView: View {
                     panel.noteWebViewFocused()
                 }
 #if DEBUG
-                dlog(
+                cmuxDebugLog(
                     "browser.focus.addressBar.exit.handoff panel=\(panel.id.uuidString.prefix(5)) " +
                     "focusedWebView=\(focusedWebView ? 1 : 0)"
                 )
@@ -2264,7 +2181,7 @@ struct BrowserPanelView: View {
                 panel.restoreAddressBarPageFocusIfNeeded { restored in
                     guard shouldApplyAddressBarExitFallback(in: window) else {
 #if DEBUG
-                        dlog(
+                        cmuxDebugLog(
                             "browser.focus.addressBar.exit.handoff panel=\(panel.id.uuidString.prefix(5)) " +
                             "result=skip_stale_restore restored=\(restored ? 1 : 0)"
                         )
@@ -2278,7 +2195,7 @@ struct BrowserPanelView: View {
                         let fallbackFocusedWebView = window.makeFirstResponder(panel.webView)
                         hasWebViewResponder = fallbackFocusedWebView
 #if DEBUG
-                        dlog(
+                        cmuxDebugLog(
                             "browser.focus.addressBar.exit.handoff panel=\(panel.id.uuidString.prefix(5)) " +
                             "fallbackFocusedWebView=\(fallbackFocusedWebView ? 1 : 0) " +
                             "restored=\(restored ? 1 : 0)"
@@ -2300,22 +2217,6 @@ enum OmnibarInputIntent: Equatable {
     case queryLike
     case ambiguous
 }
-
-    struct OmnibarOpenTabMatch: Equatable {
-        let tabId: UUID
-        let panelId: UUID
-        let url: String
-        let title: String?
-        let isKnownOpenTab: Bool
-
-        init(tabId: UUID, panelId: UUID, url: String, title: String?, isKnownOpenTab: Bool = true) {
-            self.tabId = tabId
-            self.panelId = panelId
-            self.url = url
-            self.title = title
-            self.isKnownOpenTab = isKnownOpenTab
-        }
-    }
 
 func omnibarInputIntent(for query: String) -> OmnibarInputIntent {
     let trimmed = query.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -3309,8 +3210,10 @@ func browserOmnibarShouldReacquireFocusAfterEndEditing(
 }
 
 private final class OmnibarNativeTextField: NSTextField {
+    var panelId: UUID?
     var onPointerDown: (() -> Void)?
     var onHandleKeyEvent: ((NSEvent, NSTextView?) -> Bool)?
+    var suppressNextFocusReacquireOnEndEditing = false
     /// Anchor index for Shift+click selection extension, reset on non-shift clicks.
     private var shiftClickAnchor: Int?
 
@@ -3331,7 +3234,7 @@ private final class OmnibarNativeTextField: NSTextField {
     override func mouseDown(with event: NSEvent) {
         #if DEBUG
         let frType = window?.firstResponder.map { String(describing: type(of: $0)) } ?? "nil"
-        dlog(
+        cmuxDebugLog(
             "browser.omnibarClick win=\(window?.windowNumber ?? -1) " +
             "fr=\(frType) hasEditor=\(currentEditor() == nil ? 0 : 1)"
         )
@@ -3345,7 +3248,7 @@ private final class OmnibarNativeTextField: NSTextField {
             let result = window?.makeFirstResponder(self) ?? false
 #if DEBUG
             let frAfter = window?.firstResponder.map { String(describing: type(of: $0)) } ?? "nil"
-            dlog(
+            cmuxDebugLog(
                 "browser.omnibarClick.makeFirstResponder result=\(result ? 1 : 0) " +
                 "win=\(window?.windowNumber ?? -1) fr=\(frAfter)"
             )
@@ -3471,8 +3374,10 @@ private final class OmnibarNativeTextField: NSTextField {
 }
 
 private struct OmnibarTextFieldRepresentable: NSViewRepresentable {
+    let panelId: UUID
     @Binding var text: String
     @Binding var isFocused: Bool
+    let selectAllRequestId: UInt64
     let inlineCompletion: OmnibarInlineCompletion?
     let placeholder: String
     let onTap: () -> Void
@@ -3496,6 +3401,8 @@ private struct OmnibarTextFieldRepresentable: NSViewRepresentable {
         var lastPublishedHasMarkedText: Bool = false
         /// Guards against infinite focus loops: `true` = focus requested, `false` = blur requested, `nil` = idle.
         var pendingFocusRequest: Bool?
+        var pendingSelectAllRequestId: UInt64?
+        var appliedSelectAllRequestId: UInt64 = 0
 
         init(parent: OmnibarTextFieldRepresentable) {
             self.parent = parent
@@ -3526,7 +3433,7 @@ private struct OmnibarTextFieldRepresentable: NSViewRepresentable {
             if !detail.isEmpty {
                 line += " \(detail)"
             }
-            dlog(line)
+            cmuxDebugLog(line)
         }
 #endif
 
@@ -3605,6 +3512,9 @@ private struct OmnibarTextFieldRepresentable: NSViewRepresentable {
         }
 
         private func shouldReacquireFocusAfterEndEditing(window: NSWindow?) -> Bool {
+            if parentField?.suppressNextFocusReacquireOnEndEditing == true {
+                return false
+            }
             if pointerDownBlurIntent(window: window) {
                 return false
             }
@@ -3627,20 +3537,25 @@ private struct OmnibarTextFieldRepresentable: NSViewRepresentable {
                 }
             }
             attachSelectionObserverIfNeeded()
+            if let field = obj.object as? OmnibarNativeTextField {
+                field.suppressNextFocusReacquireOnEndEditing = false
+                applyPendingSelectAllIfPossible(field: field)
+            }
             publishSelectionState()
         }
 
         func controlTextDidEndEditing(_ obj: Notification) {
+            let shouldReacquire = shouldReacquireFocusAfterEndEditing(window: parentField?.window)
 #if DEBUG
             let nextOther = nextResponderIsOtherTextField(window: parentField?.window)
             let pointerBlur = pointerDownBlurIntent(window: parentField?.window)
             logFocusEvent(
                 "controlTextDidEndEditing",
-                detail: "nextOther=\(nextOther ? 1 : 0) pointerBlur=\(pointerBlur ? 1 : 0) shouldReacquire=\(shouldReacquireFocusAfterEndEditing(window: parentField?.window) ? 1 : 0)"
+                detail: "nextOther=\(nextOther ? 1 : 0) pointerBlur=\(pointerBlur ? 1 : 0) shouldReacquire=\(shouldReacquire ? 1 : 0)"
             )
 #endif
             if parent.isFocused {
-                if shouldReacquireFocusAfterEndEditing(window: parentField?.window) {
+                if shouldReacquire {
 #if DEBUG
                     logFocusEvent("controlTextDidEndEditing.reacquire.begin")
 #endif
@@ -3685,6 +3600,7 @@ private struct OmnibarTextFieldRepresentable: NSViewRepresentable {
 #endif
                 parent.onFieldLostFocus()
             }
+            parentField?.suppressNextFocusReacquireOnEndEditing = false
             detachSelectionObserver()
         }
 
@@ -3807,6 +3723,35 @@ private struct OmnibarTextFieldRepresentable: NSViewRepresentable {
         }
 
         weak var parentField: OmnibarNativeTextField?
+
+        func queueSelectAllRequest(_ requestId: UInt64) {
+            guard requestId != 0, appliedSelectAllRequestId != requestId else { return }
+            pendingSelectAllRequestId = requestId
+        }
+
+        @discardableResult
+        func applyPendingSelectAllIfPossible(
+            field: OmnibarNativeTextField
+        ) -> Bool {
+            guard let requestId = pendingSelectAllRequestId,
+                  requestId != 0,
+                  appliedSelectAllRequestId != requestId else {
+                return false
+            }
+
+            guard let editor = field.currentEditor() as? NSTextView,
+                  !editor.hasMarkedText() else {
+                return false
+            }
+            let length = editor.string.utf16.count
+            isProgrammaticMutation = true
+            editor.setSelectedRange(NSRange(location: 0, length: length))
+            isProgrammaticMutation = false
+            appliedSelectAllRequestId = requestId
+            pendingSelectAllRequestId = nil
+            publishSelectionState()
+            return true
+        }
 
         func publishSelectionState() {
             guard let field = parentField else { return }
@@ -3953,6 +3898,8 @@ private struct OmnibarTextFieldRepresentable: NSViewRepresentable {
 
     func makeNSView(context: Context) -> OmnibarNativeTextField {
         let field = OmnibarNativeTextField(frame: .zero)
+        field.panelId = panelId
+        field.identifier = browserOmnibarTextFieldIdentifier
         field.font = .systemFont(ofSize: 12)
         field.placeholderString = placeholder
         field.delegate = context.coordinator
@@ -3975,7 +3922,9 @@ private struct OmnibarTextFieldRepresentable: NSViewRepresentable {
     func updateNSView(_ nsView: OmnibarNativeTextField, context: Context) {
         context.coordinator.parent = self
         context.coordinator.parentField = nsView
+        nsView.panelId = panelId
         nsView.placeholderString = placeholder
+        context.coordinator.queueSelectAllRequest(selectAllRequestId)
 
         let activeInlineCompletion = omnibarInlineCompletionIfBufferMatchesTypedPrefix(
             bufferText: text,
@@ -4026,11 +3975,15 @@ private struct OmnibarTextFieldRepresentable: NSViewRepresentable {
                     let alreadyFocused = fr === nsView ||
                         nsView.currentEditor() != nil ||
                         ((fr as? NSTextView)?.delegate as? NSTextField) === nsView
-                    guard !alreadyFocused else { return }
+                    if alreadyFocused {
+                        coordinator?.applyPendingSelectAllIfPossible(field: nsView)
+                        return
+                    }
 #if DEBUG
                     coordinator?.logFocusEvent("updateNSView.requestFocus.apply")
 #endif
                     window.makeFirstResponder(nsView)
+                    coordinator?.applyPendingSelectAllIfPossible(field: nsView)
                 }
             } else if !isFocused, isFirstResponder, context.coordinator.pendingFocusRequest != false {
 #if DEBUG
@@ -4064,6 +4017,7 @@ private struct OmnibarTextFieldRepresentable: NSViewRepresentable {
                 }
             }
         }
+        context.coordinator.applyPendingSelectAllIfPossible(field: nsView)
 
         if let editor = nsView.currentEditor() as? NSTextView, !editor.hasMarkedText() {
             if let activeInlineCompletion {
@@ -4100,6 +4054,37 @@ private struct OmnibarTextFieldRepresentable: NSViewRepresentable {
         coordinator.detachSelectionObserver()
         coordinator.parentField = nil
     }
+}
+
+func browserOmnibarPanelId(for responder: NSResponder?) -> UUID? {
+    browserOmnibarField(for: responder)?.panelId
+}
+
+@discardableResult
+func browserPrepareOmnibarForProgrammaticBlur(panelId: UUID, responder: NSResponder?) -> Bool {
+    guard let field = browserOmnibarField(for: responder),
+          field.panelId == panelId else {
+        return false
+    }
+    field.suppressNextFocusReacquireOnEndEditing = true
+    return true
+}
+
+private func browserOmnibarField(for responder: NSResponder?) -> OmnibarNativeTextField? {
+    guard let responder else { return nil }
+
+    if let field = responder as? OmnibarNativeTextField {
+        return field
+    }
+
+    if let editor = responder as? NSTextView,
+       editor.isFieldEditor,
+       let field = cmuxFieldEditorOwnerView(editor) as? OmnibarNativeTextField,
+       field.currentEditor() === editor {
+        return field
+    }
+
+    return nil
 }
 
 private struct OmnibarSuggestionsView: View {
@@ -4269,7 +4254,21 @@ private struct OmnibarSuggestionsView: View {
             ForEach(Array(items.enumerated()), id: \.element.id) { idx, item in
             Button {
                 #if DEBUG
-                dlog("browser.suggestionClick index=\(idx) text=\"\(item.listText)\"")
+                let suggestionKind: String = {
+                    switch item.kind {
+                    case .search:
+                        return "search"
+                    case .navigate:
+                        return "navigate"
+                    case .history:
+                        return "history"
+                    case .switchToTab:
+                        return "switchToTab"
+                    case .remote:
+                        return "remote"
+                    }
+                }()
+                cmuxDebugLog("browser.suggestionClick index=\(idx) kind=\(suggestionKind) textBytes=\(item.listText.utf8.count)")
                 #endif
                 onCommit(item)
             } label: {
@@ -4561,7 +4560,7 @@ struct WebViewRepresentable: NSViewRepresentable {
             let recordedWidthDesc = recordedHostedInspectorSideDockWidth.map {
                 String(format: "%.1f", $0)
             } ?? "nil"
-            dlog(
+            cmuxDebugLog(
                 "browser.panel.hostedInspector stage=\(reason).dockControls " +
                 "host=\(Self.debugObjectID(self)) allowSideDock=\(sideDockAllowed ? 1 : 0) " +
                 "recordedWidth=\(recordedWidthDesc) bounds=\(Self.debugRect(bounds))"
@@ -4683,7 +4682,7 @@ struct WebViewRepresentable: NSViewRepresentable {
                 guard let window, let contentView = window.contentView else { return .zero }
                 return contentView.convert(bounds, from: self)
             }()
-            dlog(
+            cmuxDebugLog(
                 "browser.panel.host stage=\(stage) event=\(String(describing: event?.type)) " +
                 "point=\(String(format: "%.1f,%.1f", point.x, point.y)) pass=\(passThrough ? 1 : 0) " +
                 "hostFrameInContent=\(String(format: "%.1f,%.1f %.1fx%.1f", hostRectInContent.origin.x, hostRectInContent.origin.y, hostRectInContent.width, hostRectInContent.height)) " +
@@ -4707,7 +4706,7 @@ struct WebViewRepresentable: NSViewRepresentable {
         ) {
             let pointDesc = point.map { String(format: "%.1f,%.1f", $0.x, $0.y) } ?? "nil"
             let preferredWidthDesc = preferredHostedInspectorWidth.map { String(format: "%.1f", $0) } ?? "nil"
-            dlog(
+            cmuxDebugLog(
                 "browser.panel.hostedInspector stage=\(stage) point=\(pointDesc) " +
                 "host=\(Self.debugObjectID(self)) container=\(Self.debugObjectID(hit.containerView)) " +
                 "page=\(Self.debugObjectID(hit.pageView)) inspector=\(Self.debugObjectID(hit.inspectorView)) " +
@@ -4728,7 +4727,7 @@ struct WebViewRepresentable: NSViewRepresentable {
                     } ?? "nil"
                     lastLoggedHostedInspectorFrames = nil
                     hasLoggedMissingHostedInspectorCandidate = true
-                    dlog(
+                    cmuxDebugLog(
                         "browser.panel.hostedInspector stage=\(reason).candidateMissing " +
                         "host=\(Self.debugObjectID(self)) preferredWidth=\(preferredWidthDesc)"
                     )
@@ -5151,7 +5150,7 @@ struct WebViewRepresentable: NSViewRepresentable {
             adaptiveBottomDockRequestCooldownDeadline = now.addingTimeInterval(Self.adaptiveBottomDockRequestCooldown)
             updateHostedInspectorDockControlAvailabilityIfNeeded(reason: reason)
 #if DEBUG
-            dlog(
+            cmuxDebugLog(
                 "browser.panel.hostedInspector stage=\(reason).adaptiveBottomDock " +
                 "host=\(Self.debugObjectID(self)) bounds=\(Self.debugRect(bounds))"
             )
@@ -5528,17 +5527,23 @@ struct WebViewRepresentable: NSViewRepresentable {
             if hostedInspectorHit != nil {
                 return false
             }
-            // Pass through a narrow leading-edge band so the shared sidebar divider
-            // handle can receive hover/click even when WKWebView is attached here.
-            // Keeping this deterministic avoids flicker from dynamic left-edge scans.
-            guard point.x >= 0, point.x <= SidebarResizeInteraction.contentSideHitWidth else {
+            // Pass through narrow content-edge bands so shared sidebar divider
+            // handles receive hover/click even when WKWebView is attached here.
+            let isLeadingContentEdge = point.x >= 0 &&
+                point.x <= SidebarResizeInteraction.contentSideHitWidth
+            let isTrailingContentEdge = point.x >= bounds.maxX - SidebarResizeInteraction.contentSideHitWidth &&
+                point.x <= bounds.maxX
+            guard isLeadingContentEdge || isTrailingContentEdge else {
                 return false
             }
             guard let window, let contentView = window.contentView else {
                 return false
             }
             let hostRectInContent = contentView.convert(bounds, from: self)
-            return hostRectInContent.minX > 1
+            if isLeadingContentEdge {
+                return hostRectInContent.minX > 1
+            }
+            return contentView.bounds.maxX - hostRectInContent.maxX > 24
         }
 
         private func updateDividerCursor(
@@ -5773,7 +5778,7 @@ struct WebViewRepresentable: NSViewRepresentable {
                     let preferredWidthDesc = preferredHostedInspectorWidth.map {
                         String(format: "%.1f", $0)
                     } ?? "nil"
-                    dlog(
+                    cmuxDebugLog(
                         "browser.panel.hostedInspector stage=\(reason).captureMissingCandidate " +
                         "host=\(Self.debugObjectID(self)) preferredWidth=\(preferredWidthDesc)"
                     )
@@ -5879,7 +5884,7 @@ struct WebViewRepresentable: NSViewRepresentable {
 
             let isLiveDrag = reason == "drag"
 #if DEBUG
-            dlog(
+            cmuxDebugLog(
                 "browser.panel.hostedInspector stage=\(reason).reapply " +
                 "host=\(Self.debugObjectID(self)) preferredWidth=\(String(format: "%.1f", preferredWidth)) " +
                 "liveDrag=\(isLiveDrag ? 1 : 0) " +
@@ -5947,7 +5952,7 @@ struct WebViewRepresentable: NSViewRepresentable {
         if let details, !details.isEmpty {
             line += " \(details)"
         }
-        dlog(line)
+        cmuxDebugLog(line)
     }
 
     private static func objectID(_ object: AnyObject?) -> String {
@@ -6118,7 +6123,7 @@ struct WebViewRepresentable: NSViewRepresentable {
         var movedSubviewCount = 0
         var reusedSourceLocalFrames = false
 #if DEBUG
-        dlog(
+        cmuxDebugLog(
             "browser.localHost.reparent.batch reason=\(reason) source=\(Self.objectID(sourceSuperview)) " +
             "container=\(Self.objectID(container)) count=\(relatedSubviews.count) " +
             "sourceType=\(String(describing: type(of: sourceSuperview))) targetType=\(String(describing: type(of: container)))"
@@ -6144,7 +6149,7 @@ struct WebViewRepresentable: NSViewRepresentable {
             view.frame = targetFrame
             movedSubviewCount += 1
 #if DEBUG
-            dlog(
+            cmuxDebugLog(
                 "browser.localHost.reparent.batch.item reason=\(reason) class=\(className) " +
                 "view=\(Self.objectID(view))"
             )
@@ -6225,7 +6230,7 @@ struct WebViewRepresentable: NSViewRepresentable {
             coordinator.lastPortalHostId = nil
             coordinator.lastSynchronizedHostGeometryRevision = 0
 #if DEBUG
-            dlog(
+            cmuxDebugLog(
                 "browser.localHost.reparent.skip web=\(Self.objectID(webView)) " +
                 "reason=offWindowReplacementHost super=\(Self.objectID(webView.superview)) " +
                 "host=\(Self.objectID(host)) slot=\(Self.objectID(slotView))"
@@ -6243,7 +6248,7 @@ struct WebViewRepresentable: NSViewRepresentable {
 
 #if DEBUG
         if shouldPreserveExternalFullscreenHost {
-            dlog(
+            cmuxDebugLog(
                 "browser.localHost.reparent.skip web=\(Self.objectID(webView)) " +
                 "reason=fullscreenExternalHost host=\(Self.objectID(host)) " +
                 "slot=\(Self.objectID(slotView)) state=\(String(describing: webView.fullscreenState))"
@@ -6444,7 +6449,7 @@ struct WebViewRepresentable: NSViewRepresentable {
             )
 #if DEBUG
         if !isCurrentPaneOwner && (shouldAttachWebView || host.window != nil) {
-            dlog(
+            cmuxDebugLog(
                 "browser.portal.owner.skip panel=\(panel.id.uuidString.prefix(5)) " +
                 "viewPane=\(paneId.id.uuidString.prefix(5)) " +
                 "currentPane=\(paneDropContext?.paneId.id.uuidString.prefix(5) ?? "nil") " +
@@ -6655,7 +6660,7 @@ struct WebViewRepresentable: NSViewRepresentable {
         // Focus handling. Avoid fighting the address bar when it is focused.
         guard let window = nsView.window else {
 #if DEBUG
-            dlog(
+            cmuxDebugLog(
                 "browser.focus.content.apply panel=\(panel.id.uuidString.prefix(5)) " +
                 "action=skip reason=no_window shouldFocus=\(shouldFocusWebView ? 1 : 0) " +
                 "panelFocused=\(isPanelFocused ? 1 : 0)"
@@ -6669,7 +6674,7 @@ struct WebViewRepresentable: NSViewRepresentable {
         if shouldFocusWebView {
             if panel.shouldSuppressWebViewFocus() {
 #if DEBUG
-                dlog(
+                cmuxDebugLog(
                     "browser.focus.content.apply panel=\(panel.id.uuidString.prefix(5)) " +
                     "action=skip reason=suppressed panelFocused=\(isPanelFocused ? 1 : 0)"
                 )
@@ -6678,7 +6683,7 @@ struct WebViewRepresentable: NSViewRepresentable {
             }
             if responderChainContains(window.firstResponder, target: webView) {
 #if DEBUG
-                dlog(
+                cmuxDebugLog(
                     "browser.focus.content.apply panel=\(panel.id.uuidString.prefix(5)) " +
                     "action=skip reason=already_first_responder_chain"
                 )
@@ -6690,7 +6695,7 @@ struct WebViewRepresentable: NSViewRepresentable {
                 panel.noteWebViewFocused()
             }
 #if DEBUG
-            dlog(
+            cmuxDebugLog(
                 "browser.focus.content.apply panel=\(panel.id.uuidString.prefix(5)) " +
                 "action=focus result=\(result ? 1 : 0) fr=\(responderDescription(window.firstResponder))"
             )
@@ -6701,7 +6706,7 @@ struct WebViewRepresentable: NSViewRepresentable {
             // clearing first responder here can undo programmatic webview focus (socket tests).
             let result = window.makeFirstResponder(nil)
 #if DEBUG
-            dlog(
+            cmuxDebugLog(
                 "browser.focus.content.apply panel=\(panel.id.uuidString.prefix(5)) " +
                 "action=resign result=\(result ? 1 : 0) fr=\(responderDescription(window.firstResponder))"
             )
@@ -6718,7 +6723,7 @@ struct WebViewRepresentable: NSViewRepresentable {
         let next = isPanelFocused && !panel.shouldSuppressWebViewFocus()
         if cmuxWebView.allowsFirstResponderAcquisition != next {
 #if DEBUG
-            dlog(
+            cmuxDebugLog(
                 "browser.focus.policy panel=\(panel.id.uuidString.prefix(5)) " +
                 "web=\(ObjectIdentifier(cmuxWebView)) old=\(cmuxWebView.allowsFirstResponderAcquisition ? 1 : 0) " +
                 "new=\(next ? 1 : 0) isPanelFocused=\(isPanelFocused ? 1 : 0) " +

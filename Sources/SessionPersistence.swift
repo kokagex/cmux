@@ -224,8 +224,9 @@ struct SessionGitBranchSnapshot: Codable, Sendable {
 struct SessionTerminalPanelSnapshot: Codable, Sendable {
     var workingDirectory: String?
     var scrollback: String?
+    var agent: SessionRestorableAgentSnapshot?
+    var tmuxStartCommand: String?
 }
-
 struct SessionBrowserPanelSnapshot: Codable, Sendable {
     var urlString: String?
     var profileID: UUID?
@@ -240,18 +241,13 @@ struct SessionMarkdownPanelSnapshot: Codable, Sendable {
     var filePath: String
 }
 
-struct SessionFileExplorerPanelSnapshot: Codable, Sendable {
-    var rootPath: String
-    var expandedPaths: [String]
-    var selectedPath: String?
-    var showHiddenFiles: Bool
-    var showIgnoredFiles: Bool
-    var openAction: String?  // Deprecated, kept for session decode compatibility
-}
-
 struct SessionEditorPanelSnapshot: Codable, Sendable {
     var filePath: String
     var isPreview: Bool
+}
+
+struct SessionFilePreviewPanelSnapshot: Codable, Sendable {
+    var filePath: String
 }
 
 struct SessionPanelSnapshot: Codable, Sendable {
@@ -268,8 +264,8 @@ struct SessionPanelSnapshot: Codable, Sendable {
     var terminal: SessionTerminalPanelSnapshot?
     var browser: SessionBrowserPanelSnapshot?
     var markdown: SessionMarkdownPanelSnapshot?
-    var fileExplorer: SessionFileExplorerPanelSnapshot?
     var editor: SessionEditorPanelSnapshot?
+    var filePreview: SessionFilePreviewPanelSnapshot?
 }
 
 enum SessionSplitOrientation: String, Codable, Sendable {
@@ -349,6 +345,7 @@ struct SessionWorkspaceSnapshot: Codable, Sendable {
     var customDescription: String?
     var customColor: String?
     var isPinned: Bool
+    var terminalScrollBarHidden: Bool?
     var currentDirectory: String
     var focusedPanelId: UUID?
     var layout: SessionWorkspaceLayoutSnapshot
@@ -416,9 +413,55 @@ enum SessionPersistenceStore {
         try? FileManager.default.removeItem(at: fileURL)
     }
 
+    static func loadReopenSessionSnapshot(
+        fileURL: URL? = nil,
+        bundleIdentifier: String? = Bundle.main.bundleIdentifier,
+        appSupportDirectory: URL? = nil
+    ) -> AppSessionSnapshot? {
+        guard let fileURL = fileURL ?? manualRestoreSnapshotFileURL(
+            bundleIdentifier: bundleIdentifier,
+            appSupportDirectory: appSupportDirectory
+        ) else {
+            return nil
+        }
+        return load(fileURL: fileURL)
+    }
+
+    static func syncManualRestoreSnapshotCache() {
+        guard let fileURL = manualRestoreSnapshotFileURL() else { return }
+        guard let snapshot = load() else {
+            removeSnapshot(fileURL: fileURL)
+            return
+        }
+        _ = save(snapshot, fileURL: fileURL)
+    }
+
     static func defaultSnapshotFileURL(
         bundleIdentifier: String? = Bundle.main.bundleIdentifier,
         appSupportDirectory: URL? = nil
+    ) -> URL? {
+        snapshotFileURL(
+            suffix: "",
+            bundleIdentifier: bundleIdentifier,
+            appSupportDirectory: appSupportDirectory
+        )
+    }
+
+    static func manualRestoreSnapshotFileURL(
+        bundleIdentifier: String? = Bundle.main.bundleIdentifier,
+        appSupportDirectory: URL? = nil
+    ) -> URL? {
+        snapshotFileURL(
+            suffix: "-previous",
+            bundleIdentifier: bundleIdentifier,
+            appSupportDirectory: appSupportDirectory
+        )
+    }
+
+    private static func snapshotFileURL(
+        suffix: String,
+        bundleIdentifier: String?,
+        appSupportDirectory: URL?
     ) -> URL? {
         let resolvedAppSupport: URL
         if let appSupportDirectory {
@@ -438,7 +481,7 @@ enum SessionPersistenceStore {
         )
         return resolvedAppSupport
             .appendingPathComponent("cmux", isDirectory: true)
-            .appendingPathComponent("session-\(safeBundleId).json", isDirectory: false)
+            .appendingPathComponent("session-\(safeBundleId)\(suffix).json", isDirectory: false)
     }
 }
 

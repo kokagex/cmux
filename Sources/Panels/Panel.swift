@@ -7,8 +7,30 @@ public enum PanelType: String, Codable, Sendable {
     case terminal
     case browser
     case markdown
-    case fileExplorer
     case editor
+    case filePreview = "filepreview"
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.singleValueContainer()
+        let rawValue = try container.decode(String.self)
+        if let type = Self(rawValue: rawValue) {
+            self = type
+            return
+        }
+        if rawValue.lowercased() == Self.filePreview.rawValue {
+            self = .filePreview
+            return
+        }
+        throw DecodingError.dataCorruptedError(
+            in: container,
+            debugDescription: "Unknown panel type: \(rawValue)"
+        )
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var container = encoder.singleValueContainer()
+        try container.encode(rawValue)
+    }
 }
 
 public enum TerminalPanelFocusIntent: Equatable {
@@ -26,11 +48,22 @@ public enum EditorPanelFocusIntent: Codable, Sendable {
     case textView
 }
 
+public enum FilePreviewPanelFocusIntent: Hashable {
+    case textEditor
+    case pdfCanvas
+    case pdfThumbnails
+    case pdfOutline
+    case imageCanvas
+    case mediaPlayer
+    case quickLook
+}
+
 public enum PanelFocusIntent: Equatable {
     case panel
     case terminal(TerminalPanelFocusIntent)
     case browser(BrowserPanelFocusIntent)
     case editor(EditorPanelFocusIntent)
+    case filePreview(FilePreviewPanelFocusIntent)
 }
 
 public enum WorkspaceAttentionFlashReason: String, Equatable, Sendable {
