@@ -294,7 +294,7 @@ enum SettingsSearchIndex {
         setting(.app, "app-icon", String(localized: "settings.app.appIcon", defaultValue: "App Icon"), "dock icon alternate"),
         setting(.app, "new-workspace-placement", String(localized: "settings.app.newWorkspacePlacement", defaultValue: "New Workspace Placement"), "workspace order position"),
         setting(.app, "minimal-mode", String(localized: "settings.app.minimalMode", defaultValue: "Minimal Mode"), "presentation compact chrome"),
-        setting(.app, "keep-workspace-open", String(localized: "settings.app.closeWorkspaceOnLastSurfaceShortcut", defaultValue: "Keep Workspace Open When Closing Last Surface"), "close last surface shortcut cmd w"),
+        setting(.app, "keep-workspace-open", String(localized: "settings.app.closeWorkspaceOnLastSurfaceShortcut", defaultValue: "Keep Workspace Open When Closing Last Surface"), "close last surface shortcut"),
         setting(.app, "focus-pane-first-click", String(localized: "settings.app.paneFirstClickFocus", defaultValue: "Focus Pane on First Click"), "mouse click focus"),
         setting(.app, "file-drops", String(localized: "settings.app.fileDrop.defaultBehavior", defaultValue: "File Drops"), "drag drop files finder path text terminal editor split preview shift"),
         setting(.app, "preferred-editor", String(localized: "settings.app.preferredEditor", defaultValue: "Open Files With"), "editor code zed subl cmd click file"),
@@ -311,6 +311,7 @@ enum SettingsSearchIndex {
         setting(.app, "notification-command", String(localized: "settings.notifications.command", defaultValue: "Notification Command"), "shell command environment variables"),
         setting(.app, "telemetry", String(localized: "settings.app.telemetry", defaultValue: "Send anonymous telemetry"), "analytics crash usage"),
         setting(.app, "warn-before-quit", String(localized: "settings.app.warnBeforeQuit", defaultValue: "Warn Before Quit"), "cmd q confirmation"),
+        setting(.app, "warn-before-closing-tab", String(localized: "settings.app.warnBeforeClosingTab", defaultValue: "Warn Before Closing Tab"), "cmd w close tab confirmation"),
         setting(.app, "rename-selects-name", String(localized: "settings.app.renameSelectsName", defaultValue: "Rename Selects Existing Name"), "command palette rename text selection"),
         setting(.app, "palette-search-all", String(localized: "settings.app.commandPaletteSearchAllSurfaces", defaultValue: "Command Palette Searches All Surfaces"), "cmd p search terminal browser markdown"),
         setting(.terminal, "scrollbar", String(localized: "settings.terminal.scrollBar", defaultValue: "Show Terminal Scroll Bar"), "terminal shell scrollback"),
@@ -354,7 +355,6 @@ enum SettingsSearchIndex {
         setting(.globalHotkey, "enable-hotkey", String(localized: "settings.globalHotkey.enable", defaultValue: "Enable System-Wide Hotkey"), "global shortcut show hide windows"),
         setting(.globalHotkey, "shortcut", String(localized: "settings.section.globalHotkey", defaultValue: "Global Hotkey"), "keyboard recorder command option control"),
         setting(.keyboardShortcuts, "shortcut-chords", String(localized: "settings.shortcuts.chords", defaultValue: "Shortcut Chords"), "tmux multi step keybindings"),
-        setting(.keyboardShortcuts, "show-hints", String(localized: "settings.shortcuts.showHints", defaultValue: "Show Cmd/Ctrl-Hold Shortcut Hints"), "modifier hold hints keyboard"),
         setting(.keyboardShortcuts, "shortcuts", String(localized: "settings.section.keyboardShortcuts", defaultValue: "Keyboard Shortcuts"), "keybindings commands"),
         setting(.workspaceColors, "indicator", String(localized: "settings.workspaceColors.indicator", defaultValue: "Workspace Color Indicator"), "tab color indicator"),
         setting(.workspaceColors, "selection", String(localized: "settings.workspaceColors.selectionColor", defaultValue: "Selection Highlight"), "selected workspace background"),
@@ -396,6 +396,7 @@ enum SettingsSearchIndex {
         "notifications.command": settingID(for: .app, idSuffix: "notification-command"),
         "app.sendAnonymousTelemetry": settingID(for: .app, idSuffix: "telemetry"),
         "app.warnBeforeQuit": settingID(for: .app, idSuffix: "warn-before-quit"),
+        "app.warnBeforeClosingTab": settingID(for: .app, idSuffix: "warn-before-closing-tab"),
         "app.renameSelectsExistingName": settingID(for: .app, idSuffix: "rename-selects-name"),
         "app.commandPaletteSearchesAllSurfaces": settingID(for: .app, idSuffix: "palette-search-all"),
         "sidebar.hideAllDetails": settingID(for: .sidebarAppearance, idSuffix: "hide-sidebar-details"),
@@ -434,8 +435,7 @@ enum SettingsSearchIndex {
         "browser.urlsToAlwaysOpenExternally": settingID(for: .browser, idSuffix: "external-patterns"),
         "browser.insecureHttpHostsAllowedInEmbeddedBrowser": settingID(for: .browser, idSuffix: "http-allowlist"),
         "browser.showImportHintOnBlankTabs": settingID(for: .browserImport, idSuffix: "import-hint"),
-        "browser.reactGrabVersion": settingID(for: .browser, idSuffix: "react-grab"),
-        "shortcuts.showModifierHoldHints": settingID(for: .keyboardShortcuts, idSuffix: "show-hints")
+        "browser.reactGrabVersion": settingID(for: .browser, idSuffix: "react-grab")
     ]
 
     static func entries(matching query: String) -> [SettingsSearchEntry] {
