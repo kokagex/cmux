@@ -497,6 +497,7 @@ extension Workspace {
             markdownSnapshot = SessionMarkdownPanelSnapshot(filePath: markdownPanel.filePath)
             editorSnapshot = nil
             filePreviewSnapshot = nil
+            rightSidebarToolSnapshot = nil
         case .editor:
             guard let editorPanel = panel as? EditorPanel else { return nil }
             terminalSnapshot = nil
@@ -521,6 +522,7 @@ extension Workspace {
             terminalSnapshot = nil
             browserSnapshot = nil
             markdownSnapshot = nil
+            editorSnapshot = nil
             filePreviewSnapshot = nil
             rightSidebarToolSnapshot = SessionRightSidebarToolPanelSnapshot(mode: toolPanel.mode)
         }
