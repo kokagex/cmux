@@ -55,6 +55,17 @@ Use `--tag` with a short descriptive name for parallel builds. This creates an i
 
 Before launching a new tagged run, clean up any older tags you started in this session (quit old tagged app + remove its `/tmp` socket/derived data).
 
+## Tagged debug CLI dogfood
+
+CLI / socket での dogfood は tag に紐付くヘルパーを使う。`/tmp/cmux-cli` は最後に reload したビルドを指すだけなのでユーザーの main app socket を叩く可能性がある — 使わない。
+
+```bash
+CMUX_TAG=<tag> scripts/cmux-debug-cli.sh list-workspaces
+CMUX_TAG=<tag> scripts/cmux-debug-cli.sh send --workspace workspace:1 --surface surface:1 "echo ok"
+```
+
+ヘルパーは `CMUX_TAG` 未設定なら起動を拒否、`/tmp/cmux-debug-<tag>.sock` を狙い、`~/Library/Developer/Xcode/DerivedData/cmux-<tag>/...` の tagged CLI を使う。周囲の cmux ターミナル context (`CMUX_SOCKET`, `CMUX_SOCKET_PASSWORD`, workspace/surface/tab/panel ID, cmuxd socket, debug log) を scrub したうえで `CMUX_SOCKET_PATH`, `CMUX_BUNDLE_ID`, `CMUX_BUNDLED_CLI_PATH` を tag に合わせてセットする。
+
 ## Debug event log
 
 All debug events go to a unified log in DEBUG builds:

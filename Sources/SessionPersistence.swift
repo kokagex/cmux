@@ -249,6 +249,10 @@ struct SessionFilePreviewPanelSnapshot: Codable, Sendable {
     var filePath: String
 }
 
+struct SessionRightSidebarToolPanelSnapshot: Codable, Sendable {
+    var mode: RightSidebarMode
+}
+
 struct SessionPanelSnapshot: Codable, Sendable {
     var id: UUID
     var type: PanelType
@@ -265,6 +269,7 @@ struct SessionPanelSnapshot: Codable, Sendable {
     var markdown: SessionMarkdownPanelSnapshot?
     var editor: SessionEditorPanelSnapshot?
     var filePreview: SessionFilePreviewPanelSnapshot?
+    var rightSidebarTool: SessionRightSidebarToolPanelSnapshot?
 }
 
 enum SessionSplitOrientation: String, Codable, Sendable {
